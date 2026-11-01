@@ -50,8 +50,31 @@ final class BoschLink {
     private BluetoothDevice bike;
     private boolean running, advertising, withName = true, receiverOn, pendingEnable, discovered;
     private int enableTries;
+    private int packets, pollTicks;
     private final Set<String> notBike = new HashSet<>();
     String ignoreAddr;
+
+    /** Some phones never deliver the bike's notifications in this role, so we also read the
+     *  characteristic once a second. The spec says a read returns the latest values. */
+    private final Runnable poll = new Runnable() {
+        @Override
+        public void run() {
+            BluetoothGatt g = gatt;
+            if (g == null || chr == null) return;
+            pollTicks++;
+            try { g.readCharacteristic(chr); } catch (SecurityException ignored) {}
+            if (packets == 0 && pollTicks >= 6) {
+                status(State.SEARCH, "Verbunden, aber keine Daten empfangen");
+            }
+            main.postDelayed(this, 1000);
+        }
+    };
+
+    private void startPoll() {
+        main.removeCallbacks(poll);
+        pollTicks = 0;
+        main.postDelayed(poll, 800);
+    }
 
     BoschLink(Context c, Handler h) {
         ctx = c.getApplicationContext();
@@ -210,6 +233,9 @@ final class BoschLink {
         chr = null;
         bike = null;
         pendingEnable = false;
+        packets = 0;
+        pollTicks = 0;
+        main.removeCallbacks(poll);
         if (g != null) {
             try { g.close(); } catch (SecurityException ignored) {}
         }
@@ -274,8 +300,9 @@ final class BoschLink {
                     State.I.boschAddr = bike.getAddress();
                     prefs.edit().putString("bosch_addr", bike.getAddress()).apply();
                 }
-                status(State.SEARCH, "eBike gefunden, aktiviere Daten …");
+                status(State.SEARCH, "eBike gefunden, lese Daten …");
                 enable(g);
+                startPoll();
             });
         }
 
@@ -284,7 +311,7 @@ final class BoschLink {
             main.post(() -> {
                 if (g != gatt) return;
                 if (status == BluetoothGatt.GATT_SUCCESS) {
-                    status(State.ON, "Verbunden");
+                    if (packets == 0) status(State.SEARCH, "Verbunden, lese Daten …");
                     try { g.readCharacteristic(chr); } catch (SecurityException ignored) {}
                     return;
                 }
@@ -333,9 +360,14 @@ final class BoschLink {
         long now = System.currentTimeMillis();
         main.post(() -> {
             State s = State.I;
-            Proto.decode(copy, s);
-            s.boschTime = now;
-            if (s.boschStatus != State.ON) status(State.ON, "Verbunden");
+            int known = Proto.decode(copy, s);
+            if (known > 0) {
+                packets++;
+                s.boschTime = now;
+                status(State.ON, "Verbunden · " + packets + " Datenpakete");
+            } else if (packets == 0) {
+                status(State.SEARCH, "Verbunden, Daten unlesbar (" + copy.length + " Byte)");
+            }
         });
     }
 
