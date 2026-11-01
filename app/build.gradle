@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+def runNo = (System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger()
+
+android {
+    namespace 'de.ebike.tracker'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'de.ebike.tracker'
+        minSdk 31
+        targetSdk 34
+        versionCode runNo
+        versionName "1.0.${runNo}"
+    }
+
+    // Fester Schlüssel, damit neue Versionen sich über die alte installieren lassen
+    // und die gespeicherten Fahrten erhalten bleiben.
+    signingConfigs {
+        fixed {
+            storeFile file('signing.p12')
+            storePassword 'ebiketracker'
+            keyAlias 'ebike'
+            keyPassword 'ebiketracker'
+            storeType 'pkcs12'
+        }
+    }
+
+    buildTypes {
+        debug { signingConfig signingConfigs.fixed }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.fixed
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    lint {
+        checkReleaseBuilds false
+        abortOnError false
+    }
+}
