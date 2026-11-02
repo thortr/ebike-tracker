@@ -53,7 +53,13 @@ final class BoschRecorder {
     private BluetoothGattCharacteristic reqChar;   // service 0010 / char 0012 (write)
     private long t0;
     private int subIdx, total, reqIdx;
-    private boolean discovered, full;
+    private boolean discovered, full, preambleSent;
+
+    /** Session-setup control block the Flow app writes to char 0012 before any
+     *  subscription (0x10-framed: protocol version, max length 244, enable channels 1-7).
+     *  Without it the bike ignores the signal subscriptions. Pure setup, no settings change. */
+    private static final byte[] PREAMBLE = hexToBytes(
+        "1002010310030400f410020301100203021002030310020304100203051002030610020307");
 
     /** Signal IDs the Flow app explicitly subscribes to by writing to char 0012.
      *  The bike only streams these after the request; our passive capture missed them.
@@ -269,6 +275,12 @@ final class BoschRecorder {
             status();
             return;
         }
+        if (!preambleSent) {
+            preambleSent = true;
+            line("# Session-Handshake an 0012 gesendet (wie Flow)");
+            writeReq(g, PREAMBLE);
+            return;
+        }
         if (reqIdx >= REQ_KEYS.length) {
             line("# " + REQ_KEYS.length + " Signale bei 0012 angefordert (wie Flow)");
             status();
@@ -286,6 +298,10 @@ final class BoschRecorder {
             buf[o++] = 0x08;
         }
         reqIdx = end;
+        writeReq(g, buf);
+    }
+
+    private void writeReq(BluetoothGatt g, byte[] buf) {
         try {
             if (Build.VERSION.SDK_INT >= 33) {
                 g.writeCharacteristic(reqChar, buf, BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE);
@@ -298,6 +314,13 @@ final class BoschRecorder {
             line("# Anfrage fehlgeschlagen: " + e.getMessage());
             status();
         }
+    }
+
+    private static byte[] hexToBytes(String s) {
+        byte[] b = new byte[s.length() / 2];
+        for (int i = 0; i < b.length; i++)
+            b[i] = (byte) Integer.parseInt(s.substring(i * 2, i * 2 + 2), 16);
+        return b;
     }
 
     private void rx(BluetoothGattCharacteristic c, byte[] v) {
