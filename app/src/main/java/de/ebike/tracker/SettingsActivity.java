@@ -111,6 +111,11 @@ public class SettingsActivity extends BaseActivity {
         bc.addView(direct, Ui.full(this, 0));
         ((LinearLayout.LayoutParams) direct.getLayoutParams()).topMargin = Ui.dp(this, 8);
 
+        Button record = Ui.button(this, "Alle Kanäle aufzeichnen (Test)", Ui.CARD2, Ui.FG);
+        record.setOnClickListener(v -> scanRecord());
+        bc.addView(record, Ui.full(this, 0));
+        ((LinearLayout.LayoutParams) record.getLayoutParams()).topMargin = Ui.dp(this, 8);
+
         // GPS & battery
         c.addView(sectionTitle("Aufzeichnung"));
         LinearLayout gc = card(c);
@@ -298,6 +303,105 @@ public class SettingsActivity extends BaseActivity {
             sv.post(() -> sv.fullScroll(android.view.View.FOCUS_DOWN));
         }));
         directLink.connect(address, name);
+    }
+
+    // ------------------------------------------------------------------ record-all-channels test
+
+    private BoschRecorder recorder;
+
+    private void scanRecord() {
+        pickDevice(this::startRecord);
+    }
+
+    private void pickDevice(java.util.function.BiConsumer<String, String> onPick) {
+        BluetoothManager bm = (BluetoothManager) getSystemService(BLUETOOTH_SERVICE);
+        BluetoothAdapter ad = bm == null ? null : bm.getAdapter();
+        if (ad == null || !ad.isEnabled()) { Toast.makeText(this, "Bitte zuerst Bluetooth einschalten.", Toast.LENGTH_LONG).show(); return; }
+        List<String> labels = new ArrayList<>();
+        List<String> addrs = new ArrayList<>();
+        List<String> names = new ArrayList<>();
+        try {
+            for (android.bluetooth.BluetoothDevice d : ad.getBondedDevices()) {
+                addrs.add(d.getAddress());
+                String n = d.getName();
+                names.add(n == null ? "" : n);
+                labels.add((n == null ? "?" : n) + "  (gekoppelt)");
+            }
+        } catch (SecurityException ignored) {}
+        ArrayAdapter<String> aa = new ArrayAdapter<>(this, android.R.layout.simple_list_item_1, labels);
+        BluetoothLeScanner sc = ad.getBluetoothLeScanner();
+        ScanCallback cb = new ScanCallback() {
+            @Override
+            public void onScanResult(int type, ScanResult r) {
+                String a = r.getDevice().getAddress();
+                String n = null;
+                try { n = r.getDevice().getName(); } catch (SecurityException ignored) {}
+                if (n == null && r.getScanRecord() != null) n = r.getScanRecord().getDeviceName();
+                String nn = n;
+                runOnUiThread(() -> {
+                    if (addrs.contains(a)) return;
+                    addrs.add(a);
+                    names.add(nn == null ? "" : nn);
+                    labels.add((nn == null ? "Unbekannt" : nn) + "  (" + r.getRssi() + " dBm)");
+                    aa.notifyDataSetChanged();
+                });
+            }
+        };
+        AlertDialog dlg = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("eBike wählen")
+                .setAdapter(aa, (d, which) -> onPick.accept(addrs.get(which), names.get(which)))
+                .setNegativeButton("Abbrechen", null)
+                .create();
+        if (sc != null) {
+            try { sc.startScan(null, new ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build(), cb); } catch (SecurityException ignored) {}
+        }
+        dlg.setOnDismissListener(d -> { if (sc != null) try { sc.stopScan(cb); } catch (SecurityException | IllegalStateException ignored) {} });
+        dlg.show();
+        Toast.makeText(this, "Dein eBike ist meist das gekoppelte Gerät („smart system eBike“).", Toast.LENGTH_LONG).show();
+    }
+
+    private void startRecord(String address, String name) {
+        LinearLayout box = Ui.col(this);
+        int p = Ui.dp(this, 12);
+        box.setPadding(p, p, p, p);
+        TextView tv = new TextView(this);
+        tv.setText("Starte …");
+        tv.setTextColor(Ui.FG);
+        tv.setTextSize(13);
+        tv.setTypeface(android.graphics.Typeface.MONOSPACE);
+        tv.setTextIsSelectable(true);
+        ScrollView sv = new ScrollView(this);
+        sv.addView(tv);
+        box.addView(sv, new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, Ui.dp(this, 300)));
+        Button saveBtn = Ui.button(this, "Speichern & Teilen", Ui.ACCENT, 0xFF1A0D03);
+        box.addView(saveBtn, Ui.full(this, 0));
+        AlertDialog dlg = new AlertDialog.Builder(this, android.R.style.Theme_Material_Dialog_Alert)
+                .setTitle("Kanäle aufzeichnen")
+                .setView(box)
+                .setPositiveButton("Schließen", null)
+                .create();
+        dlg.setOnDismissListener(d -> { if (recorder != null) { recorder.close(); recorder = null; } });
+        dlg.show();
+        recorder = new BoschRecorder(this, ui, text -> runOnUiThread(() -> {
+            tv.setText(text);
+            sv.post(() -> sv.fullScroll(android.view.View.FOCUS_DOWN));
+        }));
+        saveBtn.setOnClickListener(v -> {
+            if (recorder == null) return;
+            new Thread(() -> {
+                try {
+                    android.net.Uri u = recorder.save();
+                    runOnUiThread(() -> {
+                        Toast.makeText(this, "Gespeichert in Download/eBike Tracker", Toast.LENGTH_SHORT).show();
+                        Intent i = new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_STREAM, u).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        try { startActivity(Intent.createChooser(i, "Rohdaten senden")); } catch (RuntimeException ignored) {}
+                    });
+                } catch (java.io.IOException e) {
+                    runOnUiThread(() -> Toast.makeText(this, "Speichern fehlgeschlagen: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                }
+            }).start();
+        });
+        recorder.connect(address, name);
     }
 
     private void scanHr() {
