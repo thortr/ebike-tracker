@@ -382,6 +382,7 @@ public class SettingsActivity extends BaseActivity {
                 .create();
         dlg.setOnDismissListener(d -> { if (recorder != null) { recorder.close(); recorder = null; } });
         dlg.show();
+        if (dlg.getWindow() != null) dlg.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         recorder = new BoschRecorder(this, ui, text -> runOnUiThread(() -> {
             tv.setText(text);
             sv.post(() -> sv.fullScroll(android.view.View.FOCUS_DOWN));

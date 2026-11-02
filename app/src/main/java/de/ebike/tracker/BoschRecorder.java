@@ -46,6 +46,7 @@ final class BoschRecorder {
     private final Report report;
     private final StringBuilder file = new StringBuilder();
     private final Map<String, Integer> counts = new LinkedHashMap<>();
+    private final Map<Integer, Integer> latest = new LinkedHashMap<>();
     private final List<BluetoothGattCharacteristic> subs = new ArrayList<>();
     private BluetoothGatt gatt;
     private BluetoothDevice target;
@@ -66,11 +67,52 @@ final class BoschRecorder {
 
     private void status() {
         StringBuilder b = new StringBuilder();
-        b.append(total).append(" Pakete empfangen").append(full ? " (Protokoll voll)" : "").append("\n\n");
-        if (counts.isEmpty()) b.append("Warte auf Daten … bitte fahren.\n");
-        else { b.append("Pro Kanal:\n"); for (Map.Entry<String, Integer> e : counts.entrySet()) b.append("  ").append(e.getKey()).append(" : ").append(e.getValue()).append("\n"); }
-        b.append("\nWenn du eine Runde gefahren bist, auf „Speichern & Teilen“ tippen und mir die Datei schicken.");
+        b.append("LIVE (Vermutung – mit eBike-Display vergleichen):\n");
+        b.append("  Tempo   ~ ").append(dec(latest.get(0x9808), 100)).append(" km/h\n");
+        b.append("  Stufe     ").append(val(latest.get(0x9809))).append("\n");
+        b.append("  Trittfr.? ").append(val(latest.get(0x985a))).append("\n");
+        b.append("  Leistung? A ").append(val(latest.get(0x985d))).append("   B ").append(val(latest.get(0x9815))).append("\n");
+        b.append("  Akku/Reichw.? ").append(val(latest.get(0xa24a))).append("\n");
+        b.append("\n").append(total).append(" Pakete").append(full ? " (Protokoll voll)" : "").append("\n");
+        b.append("\nTipp: Fahre, dann HÖR KURZ AUF ZU TRETEN, während das Rad noch rollt. Der Wert, der dabei auf 0 fällt, ist Trittfrequenz bzw. Leistung.\n");
+        b.append("\nDanach „Speichern & Teilen“ und mir die Datei schicken.");
         report.update(b.toString());
+    }
+
+    private static String val(Integer v) { return v == null ? "–" : String.valueOf(v); }
+
+    private static String dec(Integer v, int div) {
+        return v == null ? "–" : String.format(Locale.GERMANY, "%.1f", v / (double) div);
+    }
+
+    private void decode(byte[] p) {
+        int i = 0;
+        while (i + 1 < p.length) {
+            if ((p[i] & 0xff) != 0x30) break;
+            int ln = p[i + 1] & 0xff;
+            int start = i + 2, end = start + ln;
+            if (end > p.length) break;
+            if (ln >= 3) {
+                int key = ((p[start] & 0xff) << 8) | (p[start + 1] & 0xff);
+                long[] tag = vInt(p, start + 2, end);
+                if (tag != null && tag[0] == 0x08) {
+                    long[] v = vInt(p, (int) tag[1], end);
+                    if (v != null) latest.put(key, (int) v[0]);
+                }
+            }
+            i = end;
+        }
+    }
+
+    private static long[] vInt(byte[] b, int i, int end) {
+        long v = 0; int s = 0;
+        while (i < end) {
+            int x = b[i++] & 0xff;
+            v |= (long) (x & 0x7f) << s;
+            if ((x & 0x80) == 0) return new long[]{v, i};
+            s += 7;
+        }
+        return null;
     }
 
     void connect(String address, String name) {
@@ -190,7 +232,8 @@ final class BoschRecorder {
         total++;
         counts.put(ch, (counts.getOrDefault(ch, 0)) + 1);
         line((System.currentTimeMillis() - t0) + "  " + ch + "  " + hex(v));
-        if (total % 10 == 0 || total < 5) status();
+        if ("0011".equals(ch)) decode(v);
+        if (total % 4 == 0 || total < 5) status();
     }
 
     Uri save() throws IOException {
