@@ -19,6 +19,8 @@ final class ChartView extends View {
     private final int decimals;
     private float minY, maxY, maxX, avg, peak;
     private int touch = -1;
+    private float downX, downY;
+    private boolean claimed;   // true once we treat the gesture as horizontal value-reading
 
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG),
             grid = new Paint(Paint.ANTI_ALIAS_FLAG), label = new Paint(Paint.ANTI_ALIAS_FLAG),
@@ -164,8 +166,24 @@ final class ChartView extends View {
         float left = 14 * d, right = getWidth() - 14 * d;
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
+                // Receive the following moves, but do NOT block the parent yet, so a
+                // vertical drag can still scroll the page. We only claim the gesture
+                // once the finger clearly moves horizontally (reading values).
+                downX = e.getX();
+                downY = e.getY();
+                claimed = false;
+                return true;
             case MotionEvent.ACTION_MOVE: {
-                getParent().requestDisallowInterceptTouchEvent(true);
+                if (!claimed) {
+                    float dx = Math.abs(e.getX() - downX), dy = Math.abs(e.getY() - downY);
+                    if (dy > dx && dy > 6 * d) return true;           // vertical → let ScrollView take over
+                    if (dx > 6 * d && dx >= dy) {                     // horizontal → read values
+                        claimed = true;
+                        getParent().requestDisallowInterceptTouchEvent(true);
+                    } else {
+                        return true;                                 // not decided yet
+                    }
+                }
                 float km = (e.getX() - left) / (right - left) * maxX;
                 int best = 0;
                 float bd = Float.MAX_VALUE;
@@ -180,6 +198,7 @@ final class ChartView extends View {
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_CANCEL:
                 touch = -1;
+                claimed = false;
                 invalidate();
                 return true;
             default:

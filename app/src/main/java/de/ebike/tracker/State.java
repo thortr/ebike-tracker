@@ -117,4 +117,16 @@ final class State {
         int m = motorPowerEst(now);
         return rp + (m < 0 ? 0 : m);
     }
+
+    // a254 (field `range`) is the range for MAXIMUM assist (Turbo) – it doesn't change
+    // with the selected level. The bike sends no per-level range, so we scale it to the
+    // current level the same way the display does:
+    //   range(level) = rangeTurbo × (1 + f_turbo) / (1 + f_level)
+    // Cross-checked against Flow: 38 km (Turbo) → 104 km in ECO, Flow showed ~106.
+    int rangeCurrent() {
+        if (range < 0) return -1;
+        int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
+        float fTurbo = ASSIST_FACTOR[ASSIST_FACTOR.length - 1];
+        return Math.round(range * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
+    }
 }
