@@ -140,7 +140,9 @@ final class BoschLink {
     // ---------------------------------------------------------------- advertising
 
     private void startAdv() {
-        if (!running || advertising || gatt != null) return;
+        // Keep advertising even while a connection exists, so the Flow app can
+        // still discover us during accessory registration.
+        if (!running || advertising) return;
         BluetoothAdapter ad = adapter();
         if (ad == null || !ad.isEnabled()) { status(State.OFF, "Bluetooth ist aus"); return; }
         adv = ad.getBluetoothLeAdvertiser();
@@ -207,7 +209,8 @@ final class BoschLink {
         if (ignoreAddr != null && ignoreAddr.equalsIgnoreCase(a)) return; // our own HR connection
         if (st == BluetoothProfile.STATE_CONNECTED) {
             if (gatt != null || notBike.contains(a)) return;
-            stopAdv();
+            // Do NOT stop advertising here: the Flow app must still be able to
+            // find us while it registers the phone as an accessory.
             bike = d;
             discovered = false;
             enableTries = 0;
@@ -398,18 +401,16 @@ final class BoschLink {
         receiverOn = true;
     }
 
-    /** Removes the pairing with the bike (hidden API, may not work on every phone). */
+    /** Soft reset of our own link only. Does NOT remove the system Bluetooth bond,
+     *  because the Flow app shares it — removing it would cut the Flow app off from
+     *  the bike (which happened before). To fully unregister, remove the phone in
+     *  the Flow app under Components. */
     boolean forgetBike() {
-        String a = prefs.getString("bosch_addr", null);
-        BluetoothAdapter ad = adapter();
-        if (a == null || ad == null) return false;
-        try {
-            BluetoothDevice d = ad.getRemoteDevice(a);
-            Object r = d.getClass().getMethod("removeBond").invoke(d);
-            prefs.edit().remove("bosch_addr").apply();
-            return Boolean.TRUE.equals(r);
-        } catch (Exception e) {
-            return false;
-        }
+        closeClient();
+        notBike.clear();
+        prefs.edit().remove("bosch_addr").apply();
+        State.I.boschAddr = null;
+        if (running) main.postDelayed(this::startAdv, 400);
+        return true;
     }
 }

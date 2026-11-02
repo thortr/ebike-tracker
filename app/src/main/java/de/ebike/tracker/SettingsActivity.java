@@ -97,11 +97,10 @@ public class SettingsActivity extends BaseActivity {
                 + "Bosch liefert deine Tretleistung, Trittfrequenz, Tempo, Akkustand und Kilometerstand. "
                 + "Motorleistung und Unterstützungsstufe stellt die Schnittstelle nicht bereit. "
                 + "Es kann immer nur ein Zubehör gleichzeitig verbunden sein, zum Beispiel nicht zusätzlich ein Garmin."));
-        Button forget = Ui.button(this, "Kopplung mit dem eBike lösen", Ui.CARD2, Ui.FG);
+        Button forget = Ui.button(this, "Bosch-Verbindung neu starten", Ui.CARD2, Ui.FG);
         forget.setOnClickListener(v -> {
-            boolean ok = TrackerService.instance != null && TrackerService.instance.forgetBike();
-            Toast.makeText(this, ok ? "Kopplung gelöst. Entferne das Handy auch in der Flow-App unter Komponenten."
-                    : "Das ging nicht automatisch. Entferne die Kopplung in den Bluetooth-Einstellungen des Handys.", Toast.LENGTH_LONG).show();
+            if (TrackerService.instance != null) TrackerService.instance.forgetBike();
+            Toast.makeText(this, "Verbindung neu gestartet. Zum vollständigen Entfernen das Handy in der Flow-App unter Komponenten löschen.", Toast.LENGTH_LONG).show();
         });
         bc.addView(forget, Ui.full(this, 0));
         ((LinearLayout.LayoutParams) forget.getLayoutParams()).topMargin = Ui.dp(this, 10);
@@ -193,10 +192,11 @@ public class SettingsActivity extends BaseActivity {
         boschInfo.setTextColor(s.boschStatus == State.ON ? Ui.OK : s.boschStatus == State.SEARCH ? Ui.WARN : Ui.FG);
 
         String name = TrackerService.instance == null ? "?" : TrackerService.instance.boschName();
-        boschName.setText("1. eBike einschalten, diese Seite offen lassen.\n"
-                + "2. Flow-App öffnen → dein eBike → Zahnrad → Komponenten → Neues Gerät hinzufügen.\n"
+        boschName.setText("1. eBike einschalten, diese Seite offen lassen (das Handy sendet nur, solange sie offen ist).\n"
+                + "2. Flow-App → dein eBike → Zahnrad → Komponenten → Neues Gerät hinzufügen → „Zubehör“.\n"
                 + "3. In der Liste „" + name + "“ wählen (so heißt dein Handy).\n"
-                + "4. Kopplung am Display bzw. an der Fernbedienung des eBikes bestätigen.");
+                + "4. Kopplung am Display bzw. an der Fernbedienung des eBikes bestätigen.\n"
+                + "5. Danach beobachte oben die Statuszeile: sie sollte auf „Verbunden · N Datenpakete“ springen.");
 
         gpsInfo.setText(s.gpsMsg + (s.hasBaro ? " · Barometer für die Höhe aktiv" : " · Höhe nur über GPS"));
     }
