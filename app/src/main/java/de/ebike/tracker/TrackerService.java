@@ -48,6 +48,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
 
     private float pressure = Float.NaN;
     private double baroOffset = Double.NaN;
+    private double altSmooth = Double.NaN;
     private double gpsMsl = Double.NaN;
     private long gpsAltTime;
 
@@ -320,11 +321,23 @@ public class TrackerService extends Service implements LocationListener, SensorE
             s.hrStatus = State.SEARCH;
             s.hrMsg = "Kein Pulssignal";
         }
-        double alt = currentAlt(now);
+        double altRaw = currentAlt(now);
+        if (!Double.isNaN(altRaw))
+            altSmooth = Double.isNaN(altSmooth) ? altRaw : altSmooth + 0.08 * (altRaw - altSmooth);
+        double alt = altSmooth;
         s.alt = alt;
         long dt = Math.min(2000, Math.max(0, now - lastTick));
         lastTick = now;
         tickCount++;
+
+        // Smoothed live values (GPS speed and bike power jitter; Flow shows a smoothed curve).
+        float rawSpd = s.speedKmh(now);
+        if (Float.isNaN(rawSpd)) s.dispSpeed = Float.NaN;
+        else if (rawSpd <= 0.1f) s.dispSpeed = 0f;                 // standing → snap to 0, no lingering value
+        else s.dispSpeed = Float.isNaN(s.dispSpeed) ? rawSpd : s.dispSpeed + 0.35f * (rawSpd - s.dispSpeed);
+        int rawPw = s.powerNow(now);
+        if (rawPw < 0) s.dispPower = -1;
+        else s.dispPower = s.dispPower < 0 ? rawPw : Math.round(s.dispPower + 0.3f * (rawPw - s.dispPower));
 
         if (s.recording && !s.paused && writer != null) {
             s.elapsedMs += dt;
@@ -359,10 +372,13 @@ public class TrackerService extends Service implements LocationListener, SensorE
             }
             s.distM += odoD >= 0 ? odoD : gpsD;
 
+            // Altitude is noisy (GPS especially), so only count a sustained change of 5 m
+            // from the last reference point. The smoothing above removes most of the jitter;
+            // together this keeps a flat ride near 0 m of gain.
             if (!Double.isNaN(alt)) {
                 if (Double.isNaN(refAlt)) refAlt = alt;
-                else if (alt - refAlt >= 3) { s.gainM += alt - refAlt; refAlt = alt; }
-                else if (refAlt - alt >= 3) { s.lossM += refAlt - alt; refAlt = alt; }
+                else if (alt - refAlt >= 5) { s.gainM += alt - refAlt; refAlt = alt; }
+                else if (refAlt - alt >= 5) { s.lossM += refAlt - alt; refAlt = alt; }
             }
 
             int hrv = s.hrFresh(now) ? s.hr : -1;
@@ -379,7 +395,8 @@ public class TrackerService extends Service implements LocationListener, SensorE
             writer.write(now,
                     gps ? s.lat : Double.NaN, gps ? s.lon : Double.NaN, alt, spd, hrv, pw, cad,
                     bike ? s.bikeSpeed : Float.NaN, bike ? s.soc : -1, bike ? s.odo : -1,
-                    s.distM, gps ? s.gpsSpeed : Float.NaN, gps ? s.acc : Float.NaN);
+                    s.distM, gps ? s.gpsSpeed : Float.NaN, gps ? s.acc : Float.NaN,
+                    bike ? s.assist : -1);
         }
         if (tickCount % 5 == 0) updateNotification();
     }

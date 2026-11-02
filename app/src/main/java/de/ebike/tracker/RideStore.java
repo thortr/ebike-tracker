@@ -20,7 +20,7 @@ import java.util.Properties;
 final class RideStore {
     private RideStore() {}
 
-    static final String HEADER = "t,lat,lon,alt,speed,hr,power,cadence,bike_speed,soc,odo,dist,gps_speed,acc";
+    static final String HEADER = "t,lat,lon,alt,speed,hr,power,cadence,bike_speed,soc,odo,dist,gps_speed,acc,assist";
 
     static File dir(Context c) {
         File d = new File(c.getFilesDir(), "rides");
@@ -39,14 +39,15 @@ final class RideStore {
         long[] t;
         double[] lat, lon;
         float[] alt, speed, bikeSpeed, gpsSpeed, acc, dist;
-        int[] hr, power, cadence, soc;
+        int[] hr, power, cadence, soc, assist;
         long[] odo;
 
         Samples(int cap) {
             t = new long[cap]; lat = new double[cap]; lon = new double[cap];
             alt = new float[cap]; speed = new float[cap]; bikeSpeed = new float[cap]; gpsSpeed = new float[cap];
             acc = new float[cap]; dist = new float[cap];
-            hr = new int[cap]; power = new int[cap]; cadence = new int[cap]; soc = new int[cap]; odo = new long[cap];
+            hr = new int[cap]; power = new int[cap]; cadence = new int[cap]; soc = new int[cap];
+            assist = new int[cap]; odo = new long[cap];
         }
 
         void grow() {
@@ -55,7 +56,7 @@ final class RideStore {
             alt = Arrays.copyOf(alt, c); speed = Arrays.copyOf(speed, c); bikeSpeed = Arrays.copyOf(bikeSpeed, c);
             gpsSpeed = Arrays.copyOf(gpsSpeed, c); acc = Arrays.copyOf(acc, c); dist = Arrays.copyOf(dist, c);
             hr = Arrays.copyOf(hr, c); power = Arrays.copyOf(power, c); cadence = Arrays.copyOf(cadence, c);
-            soc = Arrays.copyOf(soc, c); odo = Arrays.copyOf(odo, c);
+            soc = Arrays.copyOf(soc, c); assist = Arrays.copyOf(assist, c); odo = Arrays.copyOf(odo, c);
         }
 
         boolean hasAny(int[] a) {
@@ -106,6 +107,7 @@ final class RideStore {
                 s.dist[i] = f(p[11]);
                 s.gpsSpeed[i] = p.length > 12 ? f(p[12]) : Float.NaN;
                 s.acc[i] = p.length > 13 ? f(p[13]) : Float.NaN;
+                s.assist[i] = p.length > 14 ? n(p[14]) : -1;
                 s.n++;
             }
         }
@@ -272,7 +274,7 @@ final class RideStore {
         }
 
         void write(long t, double lat, double lon, double alt, float speed, int hr, int power, int cad,
-                   float bikeSpeed, int soc, long odo, double dist, float gpsSpeed, float acc) {
+                   float bikeSpeed, int soc, long odo, double dist, float gpsSpeed, float acc, int assist) {
             StringBuilder b = new StringBuilder(120);
             b.append(t).append(',');
             if (!Double.isNaN(lat)) b.append(String.format(Locale.US, "%.6f", lat));
@@ -300,6 +302,8 @@ final class RideStore {
             if (!Float.isNaN(gpsSpeed)) b.append(String.format(Locale.US, "%.2f", gpsSpeed));
             b.append(',');
             if (!Float.isNaN(acc)) b.append(String.format(Locale.US, "%.0f", acc));
+            b.append(',');
+            if (assist >= 0) b.append(assist);
             try {
                 w.write(b.toString());
                 w.newLine();

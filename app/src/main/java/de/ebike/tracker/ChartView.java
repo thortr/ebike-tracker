@@ -22,6 +22,11 @@ final class ChartView extends View {
     private float downX, downY;
     private boolean claimed;   // true once we treat the gesture as horizontal value-reading
 
+    /** Reports the distance (km) the finger is on, so the map can show that spot. */
+    interface Scrub { void onScrub(float km, boolean active); }
+    private Scrub scrub;
+    void setScrubListener(Scrub s) { scrub = s; }
+
     private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG), fill = new Paint(Paint.ANTI_ALIAS_FLAG),
             grid = new Paint(Paint.ANTI_ALIAS_FLAG), label = new Paint(Paint.ANTI_ALIAS_FLAG),
             head = new Paint(Paint.ANTI_ALIAS_FLAG), bg = new Paint(Paint.ANTI_ALIAS_FLAG),
@@ -193,6 +198,7 @@ final class ChartView extends View {
                 }
                 touch = best;
                 invalidate();
+                if (scrub != null) scrub.onScrub(xs[touch], true);
                 return true;
             }
             case MotionEvent.ACTION_UP:
@@ -200,6 +206,7 @@ final class ChartView extends View {
                 touch = -1;
                 claimed = false;
                 invalidate();
+                if (scrub != null) scrub.onScrub(0, false);
                 return true;
             default:
                 return true;

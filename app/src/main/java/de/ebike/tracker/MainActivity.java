@@ -85,7 +85,7 @@ public class MainActivity extends BaseActivity {
         assist = new Tile(this, "Stufe", "", Ui.ACCENT, 34);
         addRow(grid, batt, assist);
         range = new Tile(this, "Reichweite", "km", Ui.BATT, 34);
-        energy = new Tile(this, "Energie", "Wh", Ui.BATT, 34);
+        energy = new Tile(this, "Verbrauch", "Wh/km", Ui.BATT, 34);
         addRow(grid, range, energy);
         motor = new Tile(this, "Motor ~", "W", Ui.POWER, 40);
         total = new Tile(this, "Gesamt ~", "W", Ui.POWER, 34);
@@ -230,13 +230,14 @@ public class MainActivity extends BaseActivity {
         setChip(chipHr, "Puls", s.hrStatus);
         setChip(chipBike, "eBike", s.boschStatus);
 
-        float spd = s.speedKmh(now);
+        float spd = Float.isNaN(s.dispSpeed) ? s.speedKmh(now) : s.dispSpeed;
         speed.set(Float.isNaN(spd) ? "–" : Ui.f1(spd));
         time.set(Ui.dur(s.elapsedMs));
         dist.set(Ui.f2(s.distM / 1000));
         hr.set(s.hrFresh(now) ? String.valueOf(s.hr) : "–");
         boolean bike = s.bosch();
-        power.set(s.powerNow(now) >= 0 ? String.valueOf(s.powerNow(now)) : "–");
+        int dp = s.dispPower >= 0 ? s.dispPower : s.powerNow(now);
+        power.set(dp >= 0 ? String.valueOf(dp) : "–");
         cad.set(s.cadenceNow(now) >= 0 ? String.valueOf(s.cadenceNow(now)) : "–");
         avgPower.set(s.nPower > 0 ? Ui.f0(s.sumPower / s.nPower) : "–");
         avgSpeed.set(s.movingMs > 0 ? Ui.f1(s.distM / (s.movingMs / 1000.0) * 3.6) : "–");
@@ -246,7 +247,8 @@ public class MainActivity extends BaseActivity {
         batt.set(bike && s.soc >= 0 ? String.valueOf(s.soc) : "–");
         assist.set(bike && s.assist >= 0 ? String.valueOf(s.assist) : "–");
         range.set(bike && s.rangeCurrent() >= 0 ? String.valueOf(s.rangeCurrent()) : "–");
-        energy.set(bike && !Float.isNaN(s.energyWh) ? Ui.f0(s.energyWh) : "–");
+        float cons = s.consumptionWhPerKm();
+        energy.set(!Float.isNaN(cons) ? Ui.f0(cons) : "–");
         motor.set(bike && s.motorPowerEst(now) >= 0 ? String.valueOf(s.motorPowerEst(now)) : "–");
         total.set(bike && s.totalPowerEst(now) >= 0 ? String.valueOf(s.totalPowerEst(now)) : "–");
 

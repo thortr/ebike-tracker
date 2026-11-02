@@ -20,6 +20,7 @@ public class RideDetailActivity extends BaseActivity {
     private LinearLayout body;
     private RideStore.Ride ride;
     private RideStore.Samples samples;
+    private MapView map;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -77,15 +78,21 @@ public class RideDetailActivity extends BaseActivity {
         }
         addPair(tile("Gesamtzeit", Ui.dur(r.durationMs), "", Ui.MUTED), null);
 
-        // track
+        // track on a real map (OSM / satellite)
         if (s.hasTrack()) {
             boolean byPower = s.hasAny(s.power);
             body.addView(sectionTitle(byPower ? "Strecke · Farbe nach Leistung" : "Strecke · Farbe nach Tempo"));
-            TrackView tv = new TrackView(this);
+            map = new MapView(this);
             float[] col = new float[s.n];
             for (int i = 0; i < s.n; i++) col[i] = byPower ? (s.power[i] >= 0 ? s.power[i] : Float.NaN) : s.speed[i];
-            tv.setData(s, col);
-            body.addView(tv, Ui.full(this, 4));
+            map.setData(s, col);
+            body.addView(map, Ui.full(this, 4));
+            Button sat = Ui.button(this, "Satellit", Ui.CARD2, Ui.FG);
+            sat.setOnClickListener(v -> {
+                map.setSatellite(!map.isSatellite());
+                ((Button) v).setText(map.isSatellite() ? "Karte" : "Satellit");
+            });
+            body.addView(sat);
         }
 
         // charts over distance
@@ -95,6 +102,14 @@ public class RideDetailActivity extends BaseActivity {
         if (s.hasAny(s.alt)) chart("Höhe", "m", Ui.ALT, 0, x, s.alt);
         if (s.hasAny(s.speed)) chart("Tempo", "km/h", Ui.SPEED, 1, x, s.speed);
         if (s.hasAny(s.power)) chart("Deine Leistung", "W", Ui.POWER, 0, x, toF(s.power, s.n, false));
+        if (s.hasAny(s.power) && s.hasAny(s.assist)) {
+            float[] motor = new float[s.n];
+            for (int i = 0; i < s.n; i++) {
+                int m = (s.power[i] >= 0 && s.assist[i] >= 0) ? State.motorEstimate(s.power[i], s.assist[i]) : -1;
+                motor[i] = m >= 0 ? m : Float.NaN;
+            }
+            chart("Motorleistung (geschätzt)", "W", Ui.ACCENT, 0, x, motor);
+        }
         if (s.hasAny(s.hr)) chart("Puls", "bpm", Ui.HR, 0, x, toF(s.hr, s.n, true));
         if (s.hasAny(s.cadence)) chart("Trittfrequenz", "U/min", Ui.CAD, 0, x, toF(s.cadence, s.n, false));
         if (s.hasAny(s.soc)) chart("eBike-Akku", "%", Ui.BATT, 0, x, toF(s.soc, s.n, false));
@@ -128,7 +143,30 @@ public class RideDetailActivity extends BaseActivity {
     private void chart(String title, String unit, int color, int dec, float[] x, float[] y) {
         ChartView c = new ChartView(this, title, unit, color, dec);
         c.setData(x, java.util.Arrays.copyOf(y, x.length));
+        c.setScrubListener(this::markAt);
         body.addView(c, Ui.full(this, 4));
+    }
+
+    /** Finger on a chart (km) → show that spot on the map. */
+    private void markAt(float km, boolean active) {
+        if (map == null) return;
+        if (!active) { map.setMarker(0, 0, false); return; }
+        RideStore.Samples s = samples;
+        float m = km * 1000;
+        int best = 0;
+        float bd = Float.MAX_VALUE;
+        for (int i = 0; i < s.n; i++) {
+            if (Float.isNaN(s.dist[i])) continue;
+            float dd = Math.abs(s.dist[i] - m);
+            if (dd < bd) { bd = dd; best = i; }
+        }
+        // nearest sample that actually has a GPS fix
+        for (int k = 0; k < s.n; k++) {
+            int a = best - k, b = best + k;
+            if (a >= 0 && !Double.isNaN(s.lat[a])) { best = a; break; }
+            if (b < s.n && !Double.isNaN(s.lat[b])) { best = b; break; }
+        }
+        if (!Double.isNaN(s.lat[best])) map.setMarker(s.lat[best], s.lon[best], true);
     }
 
     private Tile tile(String l, String v, String u, int color) {

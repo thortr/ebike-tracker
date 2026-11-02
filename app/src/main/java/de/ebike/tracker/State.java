@@ -17,6 +17,10 @@ final class State {
     long gpsTime;
     boolean hasBaro;
 
+    // Smoothed values for the live display (raw GPS/bike data jitters a lot).
+    float dispSpeed = Float.NaN;
+    int dispPower = -1;
+
     // heart rate
     int hr = -1;
     long hrTime;
@@ -77,9 +81,15 @@ final class State {
     private static final long FRESH = 2500;
 
     float speedKmh(long now) {
-        if (bosch() && !Float.isNaN(bikeSpeed) && now - bikeSpeedTime < FRESH) return bikeSpeed;
+        // When the eBike is connected its wheel speed is authoritative. The bike stops
+        // sending when standing (the last value "sticks"), so a stale value means the bike
+        // is stopped → 0. We do NOT fall back to GPS here: GPS jitters to 2–5 km/h at a
+        // standstill, which is exactly the "5.4 km/h while standing" problem.
+        if (bosch()) {
+            if (!Float.isNaN(bikeSpeed) && now - bikeSpeedTime < FRESH) return bikeSpeed;
+            return 0f;
+        }
         if (gpsFresh(now) && !Float.isNaN(gpsSpeed)) return gpsSpeed * 3.6f;
-        if (bosch() && !Float.isNaN(bikeSpeed)) return 0f;
         return Float.NaN;
     }
 
@@ -105,10 +115,15 @@ final class State {
     static final int MOTOR_MAX_W = 600;
 
     int motorPowerEst(long now) {
-        int rp = powerNow(now);
-        if (rp < 0) return -1;                 // no eBike connected
-        int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
-        return Math.min(Math.round(rp * ASSIST_FACTOR[lvl]), MOTOR_MAX_W);
+        return motorEstimate(powerNow(now), assist);
+    }
+
+    /** Estimated motor power (W) from rider power and assist level; -1 if no rider power.
+     *  Used live and when charting a recorded ride. */
+    static int motorEstimate(int riderPower, int assistLvl) {
+        if (riderPower < 0) return -1;
+        int lvl = (assistLvl >= 0 && assistLvl < ASSIST_FACTOR.length) ? assistLvl : 0;
+        return Math.min(Math.round(riderPower * ASSIST_FACTOR[lvl]), MOTOR_MAX_W);
     }
 
     int totalPowerEst(long now) {
@@ -128,5 +143,19 @@ final class State {
         int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
         float fTurbo = ASSIST_FACTOR[ASSIST_FACTOR.length - 1];
         return Math.round(range * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
+    }
+
+    // Average consumption since the ride started, in Wh/km (e-car style). Based on the
+    // battery % drop and the PowerTube 750 capacity, which is more reliable than the raw
+    // energy signal. Momentary consumption ≈ the (estimated) motor power.
+    static final int BATTERY_WH = 750;
+
+    float consumptionWhPerKm() {
+        if (!bosch() || socStart < 0 || soc < 0) return Float.NaN;
+        double km = distM / 1000.0;
+        if (km < 0.1) return Float.NaN;
+        float used = (socStart - soc) / 100f * BATTERY_WH;
+        if (used <= 0) return Float.NaN;
+        return (float) (used / km);
     }
 }
