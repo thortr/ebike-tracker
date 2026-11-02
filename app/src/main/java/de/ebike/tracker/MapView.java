@@ -111,7 +111,7 @@ final class MapView extends View {
     @Override
     protected void onMeasure(int wSpec, int hSpec) {
         int w = MeasureSpec.getSize(wSpec);
-        setMeasuredDimension(w, Math.round(w * 0.78f));
+        setMeasuredDimension(w, Math.round(w * 0.62f));
     }
 
     private void pickZoom(float w, float h) {

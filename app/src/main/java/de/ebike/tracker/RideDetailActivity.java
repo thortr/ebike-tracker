@@ -21,6 +21,21 @@ public class RideDetailActivity extends BaseActivity {
     private RideStore.Ride ride;
     private RideStore.Samples samples;
     private MapView map;
+    private LinearLayout chartBox;
+    private TextView statsLine;
+    private java.util.List<Metric> metrics;
+    private final java.util.List<TextView> chips = new java.util.ArrayList<>();
+    private float[] xKm;
+
+    /** One selectable series: name, unit, colour, decimals and the per-sample values. */
+    private static final class Metric {
+        final String name, unit;
+        final int color, dec;
+        final float[] y;
+        Metric(String name, String unit, int color, int dec, float[] y) {
+            this.name = name; this.unit = unit; this.color = color; this.dec = dec; this.y = y;
+        }
+    }
 
     @Override
     protected void onCreate(Bundle b) {
@@ -61,7 +76,61 @@ public class RideDetailActivity extends BaseActivity {
         date.setPadding(Ui.dp(this, 6), 0, 0, Ui.dp(this, 4));
         body.addView(date);
 
-        // summary tiles
+        // ---- distance axis + the metrics that actually have data ----
+        xKm = new float[s.n];
+        for (int i = 0; i < s.n; i++) xKm[i] = Float.isNaN(s.dist[i]) ? Float.NaN : s.dist[i] / 1000f;
+
+        metrics = new java.util.ArrayList<>();
+        if (s.hasAny(s.alt)) metrics.add(new Metric("Höhe", "m", Ui.ALT, 0, s.alt));
+        if (s.hasAny(s.speed)) metrics.add(new Metric("Tempo", "km/h", Ui.SPEED, 1, s.speed));
+        if (s.hasAny(s.power)) metrics.add(new Metric("Leistung", "W", Ui.POWER, 0, toF(s.power, s.n, false)));
+        if (s.hasAny(s.power) && s.hasAny(s.assist)) metrics.add(new Metric("Motor", "W", Ui.ACCENT, 0, motorArray(s)));
+        if (s.hasAny(s.hr)) metrics.add(new Metric("Puls", "bpm", Ui.HR, 0, toF(s.hr, s.n, true)));
+        if (s.hasAny(s.cadence)) metrics.add(new Metric("Trittfr.", "/min", Ui.CAD, 0, toF(s.cadence, s.n, false)));
+        if (s.hasAny(s.soc)) metrics.add(new Metric("Akku", "%", Ui.BATT, 0, toF(s.soc, s.n, false)));
+
+        // ---- map stays on top and recolours to the selected metric ----
+        if (s.hasTrack()) {
+            map = new MapView(this);
+            body.addView(map, Ui.full(this, 4));
+            Button sat = Ui.button(this, "Satellit", Ui.CARD2, Ui.FG);
+            sat.setOnClickListener(v -> {
+                map.setSatellite(!map.isSatellite());
+                ((Button) v).setText(map.isSatellite() ? "Karte" : "Satellit");
+            });
+            body.addView(sat);
+        }
+
+        // ---- metric selector + one chart that follows the selection ----
+        if (!metrics.isEmpty()) {
+            android.widget.HorizontalScrollView hs = new android.widget.HorizontalScrollView(this);
+            hs.setHorizontalScrollBarEnabled(false);
+            LinearLayout chipRow = Ui.row(this);
+            chipRow.setPadding(0, Ui.dp(this, 4), 0, Ui.dp(this, 4));
+            for (int i = 0; i < metrics.size(); i++) {
+                final int idx = i;
+                TextView b = chip(metrics.get(i).name);
+                b.setOnClickListener(v -> selectMetric(idx));
+                chips.add(b);
+                chipRow.addView(b);
+            }
+            hs.addView(chipRow);
+            body.addView(hs);
+
+            statsLine = Ui.text(this, "", 14, Ui.MUTED, false);
+            statsLine.setPadding(Ui.dp(this, 6), Ui.dp(this, 2), 0, Ui.dp(this, 2));
+            body.addView(statsLine);
+
+            chartBox = Ui.col(this);
+            body.addView(chartBox);
+
+            int def = 0;
+            for (int i = 0; i < metrics.size(); i++) if ("Leistung".equals(metrics.get(i).name)) def = i;
+            selectMetric(def);
+        }
+
+        // ---- overview tiles ----
+        body.addView(sectionTitle("Überblick"));
         addPair(tile("Distanz", Ui.f2(r.distM / 1000), "km", Ui.FG), tile("Fahrzeit", Ui.dur(r.movingMs), "", Ui.FG));
         addPair(tile("Ø Tempo", Ui.f1(r.avgSpeed), "km/h", Ui.SPEED), tile("Max Tempo", Ui.f1(r.maxSpeed), "km/h", Ui.SPEED));
         addPair(tile("Anstieg", Ui.f0(r.gainM), "hm", Ui.ALT), tile("Abstieg", Ui.f0(r.lossM), "hm", Ui.ALT));
@@ -77,42 +146,6 @@ public class RideDetailActivity extends BaseActivity {
                     tile("Akku verbraucht", used, "%", Ui.BATT));
         }
         addPair(tile("Gesamtzeit", Ui.dur(r.durationMs), "", Ui.MUTED), null);
-
-        // track on a real map (OSM / satellite)
-        if (s.hasTrack()) {
-            boolean byPower = s.hasAny(s.power);
-            body.addView(sectionTitle(byPower ? "Strecke · Farbe nach Leistung" : "Strecke · Farbe nach Tempo"));
-            map = new MapView(this);
-            float[] col = new float[s.n];
-            for (int i = 0; i < s.n; i++) col[i] = byPower ? (s.power[i] >= 0 ? s.power[i] : Float.NaN) : s.speed[i];
-            map.setData(s, col);
-            body.addView(map, Ui.full(this, 4));
-            Button sat = Ui.button(this, "Satellit", Ui.CARD2, Ui.FG);
-            sat.setOnClickListener(v -> {
-                map.setSatellite(!map.isSatellite());
-                ((Button) v).setText(map.isSatellite() ? "Karte" : "Satellit");
-            });
-            body.addView(sat);
-        }
-
-        // charts over distance
-        float[] x = new float[s.n];
-        for (int i = 0; i < s.n; i++) x[i] = Float.isNaN(s.dist[i]) ? Float.NaN : s.dist[i] / 1000f;
-        body.addView(sectionTitle("Verlauf · zum Ablesen auf das Diagramm tippen"));
-        if (s.hasAny(s.alt)) chart("Höhe", "m", Ui.ALT, 0, x, s.alt);
-        if (s.hasAny(s.speed)) chart("Tempo", "km/h", Ui.SPEED, 1, x, s.speed);
-        if (s.hasAny(s.power)) chart("Deine Leistung", "W", Ui.POWER, 0, x, toF(s.power, s.n, false));
-        if (s.hasAny(s.power) && s.hasAny(s.assist)) {
-            float[] motor = new float[s.n];
-            for (int i = 0; i < s.n; i++) {
-                int m = (s.power[i] >= 0 && s.assist[i] >= 0) ? State.motorEstimate(s.power[i], s.assist[i]) : -1;
-                motor[i] = m >= 0 ? m : Float.NaN;
-            }
-            chart("Motorleistung (geschätzt)", "W", Ui.ACCENT, 0, x, motor);
-        }
-        if (s.hasAny(s.hr)) chart("Puls", "bpm", Ui.HR, 0, x, toF(s.hr, s.n, true));
-        if (s.hasAny(s.cadence)) chart("Trittfrequenz", "U/min", Ui.CAD, 0, x, toF(s.cadence, s.n, false));
-        if (s.hasAny(s.soc)) chart("eBike-Akku", "%", Ui.BATT, 0, x, toF(s.soc, s.n, false));
 
         // actions
         body.addView(sectionTitle("Exportieren"));
@@ -140,11 +173,59 @@ public class RideDetailActivity extends BaseActivity {
         return o;
     }
 
-    private void chart(String title, String unit, int color, int dec, float[] x, float[] y) {
-        ChartView c = new ChartView(this, title, unit, color, dec);
-        c.setData(x, java.util.Arrays.copyOf(y, x.length));
+    private float[] motorArray(RideStore.Samples s) {
+        float[] o = new float[s.n];
+        for (int i = 0; i < s.n; i++) {
+            int m = (s.power[i] >= 0 && s.assist[i] >= 0) ? State.motorEstimate(s.power[i], s.assist[i]) : -1;
+            o[i] = m >= 0 ? m : Float.NaN;
+        }
+        return o;
+    }
+
+    private TextView chip(String label) {
+        TextView t = Ui.text(this, label, 14, Ui.FG, true);
+        t.setBackground(Ui.round(this, Ui.CARD2, 14));
+        int hx = Ui.dp(this, 14), vy = Ui.dp(this, 7);
+        t.setPadding(hx, vy, hx, vy);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        lp.setMarginEnd(Ui.dp(this, 6));
+        t.setLayoutParams(lp);
+        return t;
+    }
+
+    /** Switch the active metric: highlight its chip, recolour the map, update the
+     *  Ø/min/max line and show its single chart. */
+    private void selectMetric(int idx) {
+        if (metrics == null || idx < 0 || idx >= metrics.size()) return;
+        Metric m = metrics.get(idx);
+        for (int i = 0; i < chips.size(); i++) {
+            boolean on = i == idx;
+            chips.get(i).setBackground(Ui.round(this, on ? m.color : Ui.CARD2, 14));
+            chips.get(i).setTextColor(on ? 0xFF10140C : Ui.FG);
+        }
+        if (map != null) map.setData(samples, m.y);
+
+        float mn = Float.MAX_VALUE, mx = -Float.MAX_VALUE;
+        double sum = 0;
+        int cnt = 0;
+        for (int i = 0; i < samples.n; i++) {
+            float v = m.y[i];
+            if (Float.isNaN(v)) continue;
+            mn = Math.min(mn, v); mx = Math.max(mx, v); sum += v; cnt++;
+        }
+        if (cnt == 0) statsLine.setText("keine Daten");
+        else {
+            String f = m.dec == 0 ? "%.0f" : "%.1f";
+            statsLine.setText(String.format(Locale.GERMANY,
+                    "Ø " + f + "  ·  min " + f + "  ·  max " + f + "  " + m.unit, sum / cnt, mn, mx));
+        }
+
+        chartBox.removeAllViews();
+        ChartView c = new ChartView(this, m.name, m.unit, m.color, m.dec);
+        c.setData(xKm, java.util.Arrays.copyOf(m.y, xKm.length));
         c.setScrubListener(this::markAt);
-        body.addView(c, Ui.full(this, 4));
+        chartBox.addView(c, Ui.full(this, 4));
     }
 
     /** Finger on a chart (km) → show that spot on the map. */
