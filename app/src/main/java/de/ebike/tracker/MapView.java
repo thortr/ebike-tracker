@@ -6,8 +6,12 @@ import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.RectF;
 import android.util.LruCache;
+import android.view.GestureDetector;
+import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 
 import java.io.File;
@@ -21,8 +25,9 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Raster-tile map (OpenStreetMap standard or Esri satellite) with the ride track drawn
- * on top and a movable position marker. No Google SDK / API key / Play Services needed –
- * tiles are fetched over plain HTTPS, cached in memory and on disk.
+ * on top and a movable position marker. Supports pan (drag), pinch-zoom and double-tap
+ * zoom. No Google SDK / API key / Play Services – tiles are fetched over plain HTTPS and
+ * cached in memory and on disk.
  */
 final class MapView extends View {
     private static final int TILE = 256;
@@ -36,11 +41,20 @@ final class MapView extends View {
     private double markLat = Double.NaN, markLon = Double.NaN;
     private boolean markActive;
 
+    // view state
     private int zoom = -1;
+    private double centerLat, centerLon;
+    private double scale = 1;        // live pinch factor within the current integer zoom
+    private boolean fitted;
+
     private final float d;
     private final File tileDir;
     private final LruCache<String, Bitmap> cache;
     private final ConcurrentHashMap<String, Boolean> loading = new ConcurrentHashMap<>();
+    private final ScaleGestureDetector scaleDet;
+    private final GestureDetector tapDet;
+    private float lastX, lastY;
+    private boolean panning;
 
     private final Paint bg = new Paint(), seg = new Paint(Paint.ANTI_ALIAS_FLAG),
             dot = new Paint(Paint.ANTI_ALIAS_FLAG), ring = new Paint(Paint.ANTI_ALIAS_FLAG),
@@ -52,17 +66,36 @@ final class MapView extends View {
         tileDir = new File(c.getCacheDir(), "tiles");
         if (!tileDir.exists()) tileDir.mkdirs();
         int mem = (int) (Runtime.getRuntime().maxMemory() / 1024);
-        cache = new LruCache<String, Bitmap>(Math.min(mem / 6, 12 * 1024)) {
+        cache = new LruCache<String, Bitmap>(Math.min(mem / 6, 16 * 1024)) {
             @Override protected int sizeOf(String k, Bitmap b) { return b.getByteCount() / 1024; }
         };
         bg.setColor(0xFFE8E6E1);
         seg.setStyle(Paint.Style.STROKE);
-        seg.setStrokeWidth(4f * d);
         seg.setStrokeCap(Paint.Cap.ROUND);
         seg.setStrokeJoin(Paint.Join.ROUND);
         ring.setStyle(Paint.Style.STROKE);
-        ring.setStrokeWidth(2.5f * d);
         ring.setColor(Color.WHITE);
+
+        scaleDet = new ScaleGestureDetector(c, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override public boolean onScale(ScaleGestureDetector det) {
+                scale *= det.getScaleFactor();
+                while (scale >= 2 && zoom < 19) { scale /= 2; zoom++; }
+                while (scale <= 0.5 && zoom > 3) { scale *= 2; zoom--; }
+                if (scale < 0.5) scale = 0.5;
+                if (scale > 2) scale = 2;
+                invalidate();
+                return true;
+            }
+        });
+        tapDet = new GestureDetector(c, new GestureDetector.SimpleOnGestureListener() {
+            @Override public boolean onDoubleTap(MotionEvent e) {
+                if (zoom < 19) { zoom++; invalidate(); }
+                return true;
+            }
+            @Override public void onLongPress(MotionEvent e) {
+                fitted = false; invalidate();   // long-press resets to the whole track
+            }
+        });
     }
 
     void setData(RideStore.Samples s, float[] colorBy) {
@@ -81,25 +114,19 @@ final class MapView extends View {
         }
         n = c;
         if (vMin > vMax) { vMin = 0; vMax = 1; }
-        zoom = -1;
+        fitted = false; scale = 1;
         invalidate();
     }
 
-    void setSatellite(boolean sat) {
-        if (sat == satellite) return;
-        satellite = sat;
-        invalidate();
-    }
-
+    void setSatellite(boolean sat) { if (sat != satellite) { satellite = sat; invalidate(); } }
     boolean isSatellite() { return satellite; }
 
-    /** Show (or hide) a marker at a geographic point. active=false hides it. */
     void setMarker(double la, double lo, boolean active) {
         markLat = la; markLon = lo; markActive = active;
         invalidate();
     }
 
-    // ---- Web-Mercator world pixels at the current zoom ----
+    // ---- Web-Mercator world pixels at the current integer zoom ----
     private double worldX(double lo) { return (lo + 180) / 360 * TILE * (1L << zoom); }
 
     private double worldY(double la) {
@@ -108,25 +135,36 @@ final class MapView extends View {
         return (0.5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)) * TILE * (1L << zoom);
     }
 
+    private double unLon(double wx) { return wx / (TILE * (1L << zoom)) * 360 - 180; }
+
+    private double unLat(double wy) {
+        double nn = Math.PI - 2 * Math.PI * wy / (TILE * (1L << zoom));
+        return Math.toDegrees(Math.atan(Math.sinh(nn)));
+    }
+
     @Override
     protected void onMeasure(int wSpec, int hSpec) {
         int w = MeasureSpec.getSize(wSpec);
         setMeasuredDimension(w, Math.round(w * 0.62f));
     }
 
-    private void pickZoom(float w, float h) {
+    private void fitToBounds(float w, float h) {
         double minLa = 90, maxLa = -90, minLo = 180, maxLo = -180;
         for (int i = 0; i < n; i++) {
             minLa = Math.min(minLa, lat[i]); maxLa = Math.max(maxLa, lat[i]);
             minLo = Math.min(minLo, lon[i]); maxLo = Math.max(maxLo, lon[i]);
         }
-        float pad = 24 * d;
+        float pad = 26 * d;
         for (int z = 18; z >= 2; z--) {
             zoom = z;
             double spanX = Math.abs(worldX(maxLo) - worldX(minLo));
             double spanY = Math.abs(worldY(minLa) - worldY(maxLa));
             if (spanX <= w - 2 * pad && spanY <= h - 2 * pad) break;
         }
+        centerLat = (minLa + maxLa) / 2;
+        centerLon = (minLo + maxLo) / 2;
+        scale = 1;
+        fitted = true;
     }
 
     @Override
@@ -134,62 +172,100 @@ final class MapView extends View {
         float w = getWidth(), h = getHeight();
         RectF frame = new RectF(0, 0, w, h);
         c.save();
-        android.graphics.Path clip = new android.graphics.Path();
-        clip.addRoundRect(frame, 16 * d, 16 * d, android.graphics.Path.Direction.CW);
+        Path clip = new Path();
+        clip.addRoundRect(frame, 16 * d, 16 * d, Path.Direction.CW);
         c.clipPath(clip);
         c.drawRect(frame, bg);
-
         if (n < 2) { c.restore(); return; }
-        if (zoom < 0) pickZoom(w, h);
+        if (!fitted || zoom < 0) fitToBounds(w, h);
 
-        // centre the bounding box
-        double cx = (worldX(minLon()) + worldX(maxLon())) / 2;
-        double cy = (worldY(minLat()) + worldY(maxLat())) / 2;
-        double viewLeft = cx - w / 2, viewTop = cy - h / 2;
+        double cxw = worldX(centerLon), cyw = worldY(centerLat);
+        c.translate(w / 2f, h / 2f);
+        c.scale((float) scale, (float) scale);
+        c.translate((float) -cxw, (float) -cyw);
 
+        // visible world rectangle
+        double halfW = (w / 2) / scale, halfH = (h / 2) / scale;
+        double left = cxw - halfW, right = cxw + halfW, top = cyw - halfH, bottom = cyw + halfH;
         int nTiles = 1 << zoom;
-        int x0 = (int) Math.floor(viewLeft / TILE), x1 = (int) Math.floor((viewLeft + w) / TILE);
-        int y0 = (int) Math.floor(viewTop / TILE), y1 = (int) Math.floor((viewTop + h) / TILE);
+        int x0 = (int) Math.floor(left / TILE), x1 = (int) Math.floor(right / TILE);
+        int y0 = (int) Math.floor(top / TILE), y1 = (int) Math.floor(bottom / TILE);
         for (int tx = x0; tx <= x1; tx++) {
             for (int ty = y0; ty <= y1; ty++) {
                 if (tx < 0 || ty < 0 || tx >= nTiles || ty >= nTiles) continue;
                 Bitmap bmp = tile(tx, ty, zoom);
-                float dx = (float) (tx * TILE - viewLeft), dy = (float) (ty * TILE - viewTop);
-                if (bmp != null) c.drawBitmap(bmp, dx, dy, tp);
+                if (bmp != null) c.drawBitmap(bmp, tx * TILE, ty * TILE, tp);
             }
         }
 
-        // track
+        // track (world coords; widths divided by scale to stay constant on screen)
+        float sw = (float) scale;
+        seg.setStrokeWidth(4f * d / sw);
+        ring.setStrokeWidth(2.5f * d / sw);
         int step = Math.max(1, n / 2000);
         float px = 0, py = 0;
         boolean first = true;
         for (int i = 0; i < n; i += step) {
-            float x = (float) (worldX(lon[i]) - viewLeft), y = (float) (worldY(lat[i]) - viewTop);
+            float x = (float) worldX(lon[i]), y = (float) worldY(lat[i]);
             if (!first) { seg.setColor(colorFor(val[i])); c.drawLine(px, py, x, y, seg); }
             px = x; py = y; first = false;
         }
-        // start / end
-        float sx = (float) (worldX(lon[0]) - viewLeft), sy = (float) (worldY(lat[0]) - viewTop);
-        float ex = (float) (worldX(lon[n - 1]) - viewLeft), ey = (float) (worldY(lat[n - 1]) - viewTop);
-        dot.setColor(Ui.OK); c.drawCircle(sx, sy, 6 * d, dot); c.drawCircle(sx, sy, 6 * d, ring);
-        dot.setColor(Ui.DANGER); c.drawCircle(ex, ey, 6 * d, dot); c.drawCircle(ex, ey, 6 * d, ring);
+        float r = 6 * d / sw;
+        float sx = (float) worldX(lon[0]), sy = (float) worldY(lat[0]);
+        float ex = (float) worldX(lon[n - 1]), ey = (float) worldY(lat[n - 1]);
+        dot.setColor(Ui.OK); c.drawCircle(sx, sy, r, dot); c.drawCircle(sx, sy, r, ring);
+        dot.setColor(Ui.DANGER); c.drawCircle(ex, ey, r, dot); c.drawCircle(ex, ey, r, ring);
 
-        // movable marker
         if (markActive && !Double.isNaN(markLat)) {
-            float mx = (float) (worldX(markLon) - viewLeft), my = (float) (worldY(markLat) - viewTop);
-            mk.setColor(Color.WHITE); c.drawCircle(mx, my, 9 * d, mk);
-            mk.setColor(Ui.ACCENT); c.drawCircle(mx, my, 6.5f * d, mk);
+            float mx = (float) worldX(markLon), my = (float) worldY(markLat);
+            mk.setColor(Color.WHITE); c.drawCircle(mx, my, 9 * d / sw, mk);
+            mk.setColor(Ui.ACCENT); c.drawCircle(mx, my, 6.5f * d / sw, mk);
         }
-
-        // attribution
-        tp.setColor(0x99000000);
         c.restore();
     }
 
-    private double minLat() { double m = 90; for (int i = 0; i < n; i++) m = Math.min(m, lat[i]); return m; }
-    private double maxLat() { double m = -90; for (int i = 0; i < n; i++) m = Math.max(m, lat[i]); return m; }
-    private double minLon() { double m = 180; for (int i = 0; i < n; i++) m = Math.min(m, lon[i]); return m; }
-    private double maxLon() { double m = -180; for (int i = 0; i < n; i++) m = Math.max(m, lon[i]); return m; }
+    @Override
+    public boolean onTouchEvent(MotionEvent e) {
+        getParent().requestDisallowInterceptTouchEvent(true);
+        scaleDet.onTouchEvent(e);
+        tapDet.onTouchEvent(e);
+        switch (e.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                lastX = e.getX(); lastY = e.getY(); panning = true;
+                break;
+            case MotionEvent.ACTION_POINTER_DOWN:
+                panning = false;   // second finger → pinch, not pan
+                break;
+            case MotionEvent.ACTION_MOVE:
+                if (panning && !scaleDet.isInProgress() && e.getPointerCount() == 1) {
+                    float dx = e.getX() - lastX, dy = e.getY() - lastY;
+                    lastX = e.getX(); lastY = e.getY();
+                    panBy(dx, dy);
+                }
+                break;
+            case MotionEvent.ACTION_POINTER_UP:
+                // resume single-finger pan from the remaining finger
+                int rem = e.getActionIndex() == 0 ? 1 : 0;
+                lastX = e.getX(rem); lastY = e.getY(rem); panning = true;
+                break;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                panning = false;
+                break;
+        }
+        return true;
+    }
+
+    private void panBy(float dx, float dy) {
+        if (zoom < 0) return;
+        double cxw = worldX(centerLon), cyw = worldY(centerLat);
+        cxw -= dx / scale; cyw -= dy / scale;
+        int world = TILE * (1 << zoom);
+        cxw = Math.max(1, Math.min(world - 1, cxw));
+        cyw = Math.max(1, Math.min(world - 1, cyw));
+        centerLon = unLon(cxw); centerLat = unLat(cyw);
+        invalidate();
+    }
 
     private Bitmap tile(int x, int y, int z) {
         String key = (satellite ? "s_" : "m_") + z + "_" + x + "_" + y;
@@ -224,10 +300,7 @@ final class MapView extends View {
                         while ((r = in.read(buf)) > 0) out.write(buf, 0, r);
                     }
                     Bitmap bmp = BitmapFactory.decodeFile(f.getAbsolutePath());
-                    if (bmp != null) {
-                        cache.put(key, bmp);
-                        postInvalidate();
-                    }
+                    if (bmp != null) { cache.put(key, bmp); postInvalidate(); }
                 }
                 con.disconnect();
             } catch (Exception ignored) {
