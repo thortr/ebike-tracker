@@ -22,7 +22,10 @@ import java.util.UUID;
  *
  * Signal mapping was reverse-engineered and verified against the Flow app:
  *   9808 = speed x100 (km/h) · 985d = rider power (W) · 985a = cadence x2 (rpm)
- *   9809 = assist level (1-4) · 9818 = odometer
+ *   9809 = assist level (1-4) · 9818 = odometer (m) · 8088 = battery %
+ *   a254 = range (km) · 8091 = remaining energy (Wh x10) · a243 = trip time (s)
+ *   a251 = trip distance · a246/a247 = avg/max speed · a248/a249 = avg/max cadence
+ *   a24a/a24b = avg/max rider power · 9815/9814 = rider/motor torque (experimental)
  */
 final class BikeLink {
     static final UUID SVC = UUID.fromString("00000010-eaa2-11e9-81b4-2a2ae2dbcce4");
@@ -172,13 +175,29 @@ final class BikeLink {
                     if (val != null) {
                         int v = (int) val[0];
                         got = true;
+                        long now = System.currentTimeMillis();
                         switch (key) {
-                            case 0x9808: s.bikeSpeed = v / 100f; break;
-                            case 0x985d: s.power = v; break;
-                            case 0x985a: s.cadence = v / 2; break;
+                            // --- live values ---
+                            case 0x9808: s.bikeSpeed = v / 100f; s.bikeSpeedTime = now; break;
+                            case 0x985d: s.power = v; s.powerTime = now; break;
+                            case 0x985a: s.cadence = v / 2; s.cadTime = now; break;
                             case 0x9809: s.assist = v; break;
                             case 0x9818: s.odo = v; break;
                             case 0x8088: s.soc = v; break;
+                            case 0x9815: s.riderTorque = v; break;   // rises with rider power
+                            case 0x9814: s.motorTorque = v; break;   // motor torque curve
+                            case 0x8091: s.energyWh = v / 10f; break; // remaining energy, Wh
+                            // --- range / trip totals the bike keeps ---
+                            case 0xa254: s.range = v; break;         // remaining range, km
+                            case 0xa243: s.tripTimeS = v; break;     // trip time, s
+                            case 0xa251: s.tripDist = v; break;      // trip distance
+                            // --- trip statistics (verified against Flow) ---
+                            case 0xa246: s.trAvgSpeed = v / 100f; break;
+                            case 0xa247: s.trMaxSpeed = v / 100f; break;
+                            case 0xa248: s.trAvgCad = v / 2; break;
+                            case 0xa249: s.trMaxCad = v / 2; break;
+                            case 0xa24a: s.trAvgPower = v; break;
+                            case 0xa24b: s.trMaxPower = v; break;
                             default: break;
                         }
                     }

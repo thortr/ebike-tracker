@@ -367,8 +367,8 @@ public class TrackerService extends Service implements LocationListener, SensorE
 
             int hrv = s.hrFresh(now) ? s.hr : -1;
             if (hrv > 0) { s.sumHr += hrv; s.nHr++; s.maxHr = Math.max(s.maxHr, hrv); }
-            int pw = bike ? s.power : -1;
-            int cad = bike ? s.cadence : -1;
+            int pw = s.powerNow(now);
+            int cad = s.cadenceNow(now);
             if (pw >= 0) {
                 if (moving) { s.sumPower += pw; s.nPower++; }
                 s.maxPower = Math.max(s.maxPower, pw);

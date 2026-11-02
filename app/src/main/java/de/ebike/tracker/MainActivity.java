@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends BaseActivity {
-    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed, assist;
+    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed, assist, range, energy;
     private TextView chipGps, chipHr, chipBike, status, hint;
     private Button start, pause, stop;
     private LinearLayout idleRow, recRow;
@@ -84,6 +84,9 @@ public class MainActivity extends BaseActivity {
         batt = new Tile(this, "eBike-Akku", "%", Ui.BATT, 34);
         assist = new Tile(this, "Stufe", "", Ui.ACCENT, 34);
         addRow(grid, batt, assist);
+        range = new Tile(this, "Reichweite", "km", Ui.BATT, 34);
+        energy = new Tile(this, "Energie", "Wh", Ui.BATT, 34);
+        addRow(grid, range, energy);
 
         hint = Ui.text(this, "", 13, Ui.WARN, false);
         hint.setPadding(Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8), 0);
@@ -230,8 +233,8 @@ public class MainActivity extends BaseActivity {
         dist.set(Ui.f2(s.distM / 1000));
         hr.set(s.hrFresh(now) ? String.valueOf(s.hr) : "–");
         boolean bike = s.bosch();
-        power.set(bike && s.power >= 0 ? String.valueOf(s.power) : "–");
-        cad.set(bike && s.cadence >= 0 ? String.valueOf(s.cadence) : "–");
+        power.set(s.powerNow(now) >= 0 ? String.valueOf(s.powerNow(now)) : "–");
+        cad.set(s.cadenceNow(now) >= 0 ? String.valueOf(s.cadenceNow(now)) : "–");
         avgPower.set(s.nPower > 0 ? Ui.f0(s.sumPower / s.nPower) : "–");
         avgSpeed.set(s.movingMs > 0 ? Ui.f1(s.distM / (s.movingMs / 1000.0) * 3.6) : "–");
         maxSpeed.set(s.maxSpeed > 0 ? Ui.f1(s.maxSpeed) : "–");
@@ -239,6 +242,8 @@ public class MainActivity extends BaseActivity {
         gain.set(Ui.f0(s.gainM));
         batt.set(bike && s.soc >= 0 ? String.valueOf(s.soc) : "–");
         assist.set(bike && s.assist >= 0 ? String.valueOf(s.assist) : "–");
+        range.set(bike && s.range >= 0 ? String.valueOf(s.range) : "–");
+        energy.set(bike && !Float.isNaN(s.energyWh) ? Ui.f0(s.energyWh) : "–");
 
         String st;
         if (s.recording) st = s.paused ? "Pausiert" : "● Aufzeichnung läuft";
