@@ -22,7 +22,7 @@ final class State {
     long hrTime;
 
     // Bosch Live Data Interface
-    int power = -1, cadence = -1, soc = -1, light = 0;
+    int power = -1, cadence = -1, soc = -1, light = 0, assist = -1;
     float bikeSpeed = Float.NaN, brightness = Float.NaN;
     long odo = -1, bikeClock, boschTime;
     boolean locked, charger, notDriving;

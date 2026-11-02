@@ -88,30 +88,21 @@ public class SettingsActivity extends BaseActivity {
         });
         on.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 6));
         bc.addView(on);
-        bc.addView(Ui.text(this, "So koppelst du einmalig:", 14, Ui.FG, true));
         boschName = Ui.text(this, "", 14, Ui.MUTED, false);
-        boschName.setPadding(0, Ui.dp(this, 4), 0, Ui.dp(this, 4));
-        boschName.setLineSpacing(0, 1.25f);
         bc.addView(boschName);
-        bc.addView(note("Voraussetzung: Antriebs-Software v19 oder neuer (Flow-App → Einstellungen → Systeminformation). "
-                + "Bosch liefert deine Tretleistung, Trittfrequenz, Tempo, Akkustand und Kilometerstand. "
-                + "Motorleistung und Unterstützungsstufe stellt die Schnittstelle nicht bereit. "
-                + "Es kann immer nur ein Zubehör gleichzeitig verbunden sein, zum Beispiel nicht zusätzlich ein Garmin."));
-        Button forget = Ui.button(this, "Bosch-Verbindung neu starten", Ui.CARD2, Ui.FG);
-        forget.setOnClickListener(v -> {
-            if (TrackerService.instance != null) TrackerService.instance.forgetBike();
-            Toast.makeText(this, "Verbindung neu gestartet. Zum vollständigen Entfernen das Handy in der Flow-App unter Komponenten löschen.", Toast.LENGTH_LONG).show();
-        });
-        bc.addView(forget, Ui.full(this, 0));
-        ((LinearLayout.LayoutParams) forget.getLayoutParams()).topMargin = Ui.dp(this, 10);
+        bc.addView(note("Die App verbindet sich direkt mit dem eBike (wie die Flow-App) und liest Tempo, Tretleistung, Trittfrequenz, Unterstützungsstufe und Kilometerstand. "
+                + "Voraussetzung: Antriebs-Software v19 oder neuer. "
+                + "Da das eBike nur eine Verbindung gleichzeitig zulässt, kann die Flow-App dabei getrennt sein."));
+        Button pick = Ui.button(this, "eBike auswählen", Ui.ACCENT, 0xFF1A0D03);
+        pick.setOnClickListener(v -> pickDevice((addr, nm) -> {
+            prefs.edit().putString("bike_addr", addr).putString("bike_name", nm).apply();
+            if (TrackerService.instance != null) TrackerService.instance.refreshLinks();
+            Toast.makeText(this, "eBike gewählt. Schalte es ein, die Verbindung baut sich auf.", Toast.LENGTH_LONG).show();
+        }));
+        bc.addView(pick, Ui.full(this, 0));
+        ((LinearLayout.LayoutParams) pick.getLayoutParams()).topMargin = Ui.dp(this, 8);
 
-        bc.addView(note("Test: Statt als Zubehör zu warten, kann sich die App auch selbst mit dem eBike verbinden, so wie die Flow-App. Dafür zuerst die Flow-App schließen, eBike einschalten."));
-        Button direct = Ui.button(this, "eBike direkt verbinden (Test)", Ui.CARD2, Ui.FG);
-        direct.setOnClickListener(v -> scanDirect());
-        bc.addView(direct, Ui.full(this, 0));
-        ((LinearLayout.LayoutParams) direct.getLayoutParams()).topMargin = Ui.dp(this, 8);
-
-        Button record = Ui.button(this, "Alle Kanäle aufzeichnen (Test)", Ui.CARD2, Ui.FG);
+        Button record = Ui.button(this, "Rohdaten aufzeichnen (für Entwicklung)", Ui.CARD2, Ui.FG);
         record.setOnClickListener(v -> scanRecord());
         bc.addView(record, Ui.full(this, 0));
         ((LinearLayout.LayoutParams) record.getLayoutParams()).topMargin = Ui.dp(this, 8);
@@ -195,19 +186,18 @@ public class SettingsActivity extends BaseActivity {
 
         String b = "Status: " + s.boschMsg;
         if (s.bosch()) {
-            b += "\nLeistung " + (s.power >= 0 ? s.power + " W" : "–")
-                    + " · Trittfrequenz " + (s.cadence >= 0 ? s.cadence + " U/min" : "–")
+            b += "\nTempo " + (Float.isNaN(s.bikeSpeed) ? "–" : String.format(Ui.DE, "%.1f", s.bikeSpeed) + " km/h")
+                    + " · Stufe " + (s.assist >= 0 ? s.assist : "–")
+                    + "\nLeistung " + (s.power >= 0 ? s.power + " W" : "–")
+                    + " · Trittfr. " + (s.cadence >= 0 ? s.cadence + " /min" : "–")
                     + " · Akku " + (s.soc >= 0 ? s.soc + " %" : "–");
         }
         boschInfo.setText(b);
         boschInfo.setTextColor(s.boschStatus == State.ON ? Ui.OK : s.boschStatus == State.SEARCH ? Ui.WARN : Ui.FG);
 
-        String name = TrackerService.instance == null ? "?" : TrackerService.instance.boschName();
-        boschName.setText("1. eBike einschalten, diese Seite offen lassen (das Handy sendet nur, solange sie offen ist).\n"
-                + "2. Flow-App → dein eBike → Zahnrad → Komponenten → Neues Gerät hinzufügen → „Zubehör“.\n"
-                + "3. In der Liste „" + name + "“ wählen (so heißt dein Handy).\n"
-                + "4. Kopplung am Display bzw. an der Fernbedienung des eBikes bestätigen.\n"
-                + "5. Danach beobachte oben die Statuszeile: sie sollte auf „Verbunden · N Datenpakete“ springen.");
+        String bikeName = prefs.getString("bike_name", null);
+        boschName.setText(bikeName == null ? "Noch kein eBike gewählt." : "Gewählt: " + bikeName);
+        boschName.setTextColor(Ui.MUTED);
 
         gpsInfo.setText(s.gpsMsg + (s.hasBaro ? " · Barometer für die Höhe aktiv" : " · Höhe nur über GPS"));
     }

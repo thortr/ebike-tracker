@@ -42,7 +42,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
     private SensorManager sm;
     private PowerManager.WakeLock wl;
     private HrLink hr;
-    private BoschLink bosch;
+    private BikeLink bike;
     private RideStore.Writer writer;
     private SharedPreferences prefs;
 
@@ -97,7 +97,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
             return;
         }
         hr = new HrLink(this, h);
-        bosch = new BoschLink(this, h);
+        bike = new BikeLink(this, h);
         startSensors();
         lastTick = System.currentTimeMillis();
         h.postDelayed(tick, 1000);
@@ -116,7 +116,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
         if (lm != null) { try { lm.removeUpdates(this); } catch (SecurityException ignored) {} }
         if (sm != null) sm.unregisterListener(this);
         if (hr != null) hr.close();
-        if (bosch != null) bosch.stop();
+        if (bike != null) bike.stop();
         releaseWake();
         State s = State.I;
         s.gpsStatus = State.OFF; s.gpsMsg = "Aus";
@@ -153,29 +153,19 @@ public class TrackerService extends Service implements LocationListener, SensorE
         }
     }
 
-    /** Re-reads the settings and (re)connects heart rate sensor and Bosch link. */
+    /** Re-reads the settings and (re)connects heart rate sensor and the eBike link. */
     void refreshLinks() {
-        if (hr == null || bosch == null) return;
+        if (hr == null || bike == null) return;
         startLocation();
         if (has(this, Manifest.permission.BLUETOOTH_CONNECT)) {
             String a = prefs.getString("hr_addr", null);
             if (a == null) hr.close();
             else hr.connect(a, prefs.getString("hr_name", null));
-            bosch.ignoreAddr = a;
-            if (has(this, Manifest.permission.BLUETOOTH_ADVERTISE) && prefs.getBoolean("bosch_on", true)) bosch.start();
-            else bosch.stop();
+            String bikeAddr = prefs.getString("bike_addr", null);
+            if (prefs.getBoolean("bosch_on", true) && bikeAddr != null) bike.start(bikeAddr);
+            else bike.stop();
         }
-        State.I.boschAddr = prefs.getString("bosch_addr", null);
-    }
-
-    String boschName() { return bosch == null ? "?" : bosch.advertisedName(); }
-
-    boolean forgetBike() {
-        if (bosch == null) return false;
-        boolean ok = bosch.forgetBike();
-        bosch.stop();
-        refreshLinks();
-        return ok;
+        State.I.boschAddr = prefs.getString("bike_addr", null);
     }
 
     @Override

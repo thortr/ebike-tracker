@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends BaseActivity {
-    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed;
+    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed, assist;
     private TextView chipGps, chipHr, chipBike, status, hint;
     private Button start, pause, stop;
     private LinearLayout idleRow, recRow;
@@ -82,11 +82,8 @@ public class MainActivity extends BaseActivity {
         gain = new Tile(this, "Anstieg", "hm", Ui.ALT, 34);
         addRow(grid, alt, gain);
         batt = new Tile(this, "eBike-Akku", "%", Ui.BATT, 34);
-        TextView spacer = new TextView(this);
-        LinearLayout last = Ui.row(this);
-        last.addView(batt, Ui.weight(this, 1, 4));
-        last.addView(spacer, Ui.weight(this, 1, 4));
-        grid.addView(last);
+        assist = new Tile(this, "Stufe", "", Ui.ACCENT, 34);
+        addRow(grid, batt, assist);
 
         hint = Ui.text(this, "", 13, Ui.WARN, false);
         hint.setPadding(Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8), 0);
@@ -241,6 +238,7 @@ public class MainActivity extends BaseActivity {
         alt.set(Double.isNaN(s.alt) ? "–" : Ui.f0(s.alt));
         gain.set(Ui.f0(s.gainM));
         batt.set(bike && s.soc >= 0 ? String.valueOf(s.soc) : "–");
+        assist.set(bike && s.assist >= 0 ? String.valueOf(s.assist) : "–");
 
         String st;
         if (s.recording) st = s.paused ? "Pausiert" : "● Aufzeichnung läuft";
