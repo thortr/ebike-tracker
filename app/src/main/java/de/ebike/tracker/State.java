@@ -94,4 +94,27 @@ final class State {
         if (!bosch()) return -1;
         return power >= 0 && now - powerTime < FRESH ? power : 0;
     }
+
+    // --- Estimated motor assistance -----------------------------------------
+    // The Bosch interface exposes no measured motor power, so we estimate it the
+    // way the Flow app's graphic does: rider power x the support factor of the
+    // current assist level, capped at the motor's 600 W maximum (from signal 9874).
+    // Factors are the Performance Line CX defaults (OFF/ECO/TOUR+/AUTO/TURBO);
+    // the bike doesn't send the per-level settings, so these are fixed estimates.
+    private static final float[] ASSIST_FACTOR = {0f, 0.6f, 1.4f, 2.4f, 3.4f};
+    static final int MOTOR_MAX_W = 600;
+
+    int motorPowerEst(long now) {
+        int rp = powerNow(now);
+        if (rp < 0) return -1;                 // no eBike connected
+        int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
+        return Math.min(Math.round(rp * ASSIST_FACTOR[lvl]), MOTOR_MAX_W);
+    }
+
+    int totalPowerEst(long now) {
+        int rp = powerNow(now);
+        if (rp < 0) return -1;
+        int m = motorPowerEst(now);
+        return rp + (m < 0 ? 0 : m);
+    }
 }
