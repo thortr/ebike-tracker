@@ -26,6 +26,7 @@ public class RideDetailActivity extends BaseActivity {
     private java.util.List<Metric> metrics;
     private final java.util.List<TextView> chips = new java.util.ArrayList<>();
     private float[] xKm;
+    private int[] levels;   // assist level per sample, or null if the ride has none
 
     /** One selectable series: name, unit, colour, decimals and the per-sample values. */
     private static final class Metric {
@@ -80,7 +81,15 @@ public class RideDetailActivity extends BaseActivity {
         xKm = new float[s.n];
         for (int i = 0; i < s.n; i++) xKm[i] = Float.isNaN(s.dist[i]) ? Float.NaN : s.dist[i] / 1000f;
 
+        boolean hasLv = s.hasAny(s.assist);
+        levels = null;
         metrics = new java.util.ArrayList<>();
+        if (hasLv) {
+            levels = new int[s.n];
+            float[] lvF = new float[s.n];
+            for (int i = 0; i < s.n; i++) { levels[i] = s.assist[i]; lvF[i] = s.assist[i] >= 0 ? s.assist[i] : Float.NaN; }
+            metrics.add(new Metric("Stufe", "", 0xFF9AA090, 0, lvF));
+        }
         if (s.hasAny(s.alt)) metrics.add(new Metric("Höhe", "m", Ui.ALT, 0, s.alt));
         if (s.hasAny(s.speed)) metrics.add(new Metric("Tempo", "km/h", Ui.SPEED, 1, s.speed));
         if (s.hasAny(s.power)) metrics.add(new Metric("Leistung", "W", Ui.POWER, 0, toF(s.power, s.n, false)));
@@ -123,6 +132,7 @@ public class RideDetailActivity extends BaseActivity {
 
             chartBox = Ui.col(this);
             body.addView(chartBox);
+            if (hasLv) body.addView(levelLegend());
 
             int def = 0;
             for (int i = 0; i < metrics.size(); i++) if ("Leistung".equals(metrics.get(i).name)) def = i;
@@ -146,6 +156,9 @@ public class RideDetailActivity extends BaseActivity {
                     tile("Akku verbraucht", used, "%", Ui.BATT));
         }
         addPair(tile("Gesamtzeit", Ui.dur(r.durationMs), "", Ui.MUTED), null);
+
+        // ---- breakdown per assist level ----
+        addLevelStats(s);
 
         // actions
         body.addView(sectionTitle("Exportieren"));
@@ -194,6 +207,67 @@ public class RideDetailActivity extends BaseActivity {
         return t;
     }
 
+    private static String fmtNum(double v, int dec) {
+        return String.format(Locale.GERMANY, dec == 0 ? "%.0f" : "%.1f", v);
+    }
+
+    /** Small colour key for the assist levels (Flow colours), shown under the chart. */
+    private android.view.View levelLegend() {
+        LinearLayout row = Ui.row(this);
+        row.setPadding(Ui.dp(this, 6), Ui.dp(this, 2), 0, Ui.dp(this, 2));
+        String[] lab = {"1 Eco", "2 Tour", "3 Auto", "4 Turbo"};
+        for (int i = 1; i <= 4; i++) {
+            TextView t = Ui.text(this, "● " + lab[i - 1], 12, ChartView.levelColor(i), true);
+            t.setPadding(0, 0, Ui.dp(this, 12), 0);
+            row.addView(t);
+        }
+        return row;
+    }
+
+    /** Per-assist-level breakdown: distance, time and averages for each level used. */
+    private void addLevelStats(RideStore.Samples s) {
+        if (!s.hasAny(s.assist)) return;
+        body.addView(sectionTitle("Nach Fahrstufe"));
+        String[] names = {"Stufe 0 · Aus", "Stufe 1 · Eco", "Stufe 2 · Tour", "Stufe 3 · Auto", "Stufe 4 · Turbo"};
+        double[] dist = new double[5], time = new double[5];
+        double[] sumSpd = new double[5], sumPw = new double[5], sumMo = new double[5];
+        int[] nSpd = new int[5], nPw = new int[5], nMo = new int[5];
+        for (int i = 0; i < s.n; i++) {
+            int a = s.assist[i];
+            if (a < 0 || a > 4) continue;
+            time[a] += 1;   // samples are ~1 s apart
+            if (i > 0 && !Float.isNaN(s.dist[i]) && !Float.isNaN(s.dist[i - 1])) {
+                double dd = s.dist[i] - s.dist[i - 1];
+                if (dd > 0 && dd < 200) dist[a] += dd;
+            }
+            if (!Float.isNaN(s.speed[i])) { sumSpd[a] += s.speed[i]; nSpd[a]++; }
+            if (s.power[i] >= 0) { sumPw[a] += s.power[i]; nPw[a]++; }
+            int mo = s.power[i] >= 0 ? State.motorEstimate(s.power[i], a) : -1;
+            if (mo >= 0) { sumMo[a] += mo; nMo[a]++; }
+        }
+        for (int a = 0; a <= 4; a++) {
+            if (time[a] < 1) continue;
+            LinearLayout card = Ui.col(this);
+            card.setBackground(Ui.round(this, Ui.CARD, 12));
+            int pd = Ui.dp(this, 12);
+            card.setPadding(pd, Ui.dp(this, 10), pd, Ui.dp(this, 10));
+            card.addView(Ui.text(this, "● " + names[a], 15, ChartView.levelColor(a == 0 ? -1 : a), true));
+            String spd = nSpd[a] > 0 ? fmtNum(sumSpd[a] / nSpd[a], 1) + " km/h" : "–";
+            String pw = nPw[a] > 0 ? fmtNum(sumPw[a] / nPw[a], 0) + " W" : "–";
+            String mo = nMo[a] > 0 ? fmtNum(sumMo[a] / nMo[a], 0) + " W" : "–";
+            TextView v = Ui.text(this,
+                    fmtNum(dist[a] / 1000, 2) + " km  ·  " + Ui.dur((long) (time[a] * 1000))
+                            + "\nØ Tempo " + spd + "  ·  Ø Fahrer " + pw + "  ·  Ø Motor " + mo,
+                    13, Ui.MUTED, false);
+            v.setPadding(0, Ui.dp(this, 3), 0, 0);
+            card.addView(v);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            lp.topMargin = Ui.dp(this, 8);
+            body.addView(card, lp);
+        }
+    }
+
     /** Switch the active metric: highlight its chip, recolour the map, update the
      *  Ø/min/max line and show its single chart. */
     private void selectMetric(int idx) {
@@ -204,7 +278,8 @@ public class RideDetailActivity extends BaseActivity {
             chips.get(i).setBackground(Ui.round(this, on ? m.color : Ui.CARD2, 14));
             chips.get(i).setTextColor(on ? 0xFF10140C : Ui.FG);
         }
-        if (map != null) map.setData(samples, m.y);
+        boolean byLevel = "Stufe".equals(m.name);
+        if (map != null) map.setData(samples, m.y, byLevel);
 
         float mn = Float.MAX_VALUE, mx = -Float.MAX_VALUE;
         double sum = 0;
@@ -216,14 +291,16 @@ public class RideDetailActivity extends BaseActivity {
         }
         if (cnt == 0) statsLine.setText("keine Daten");
         else {
-            String f = m.dec == 0 ? "%.0f" : "%.1f";
-            statsLine.setText(String.format(Locale.GERMANY,
-                    "Ø " + f + "  ·  min " + f + "  ·  max " + f + "  " + m.unit, sum / cnt, mn, mx));
+            // Build the numbers first, then append the unit — a '%' unit (Akku) inside a
+            // format string would be read as a conversion and crash.
+            String u = m.unit.isEmpty() ? "" : "  " + m.unit;
+            statsLine.setText("Ø " + fmtNum(sum / cnt, m.dec) + "  ·  min " + fmtNum(mn, m.dec)
+                    + "  ·  max " + fmtNum(mx, m.dec) + u);
         }
 
         chartBox.removeAllViews();
         ChartView c = new ChartView(this, m.name, m.unit, m.color, m.dec);
-        c.setData(xKm, java.util.Arrays.copyOf(m.y, xKm.length));
+        c.setData(xKm, java.util.Arrays.copyOf(m.y, xKm.length), levels);
         c.setScrubListener(this::markAt);
         chartBox.addView(c, Ui.full(this, 4));
     }

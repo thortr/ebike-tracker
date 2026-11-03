@@ -14,6 +14,18 @@ import android.view.View;
 /** Line chart of one value over distance. Touch and drag to read single values. */
 final class ChartView extends View {
     private float[] xs = new float[0], ys = new float[0];
+    private int[] lv;   // assist level per (down-sampled) point; null = colour the line by metric
+
+    /** Flow colours for the assist levels: 1 ECO green · 2 Tour blue · 3 Auto violet · 4 Turbo red. */
+    static int levelColor(int lvl) {
+        switch (lvl) {
+            case 1: return 0xFF34C759;
+            case 2: return 0xFF3E9BFF;
+            case 3: return 0xFF9B6CFF;
+            case 4: return 0xFFFF3B4E;
+            default: return 0xFF9AA090;
+        }
+    }
     private final int color;
     private final String title, unit;
     private final int decimals;
@@ -57,24 +69,30 @@ final class ChartView extends View {
         mark.setStrokeWidth(1.2f * d);
     }
 
-    /** x in km, y in the chart's unit; NaN = no value. */
-    void setData(float[] x, float[] y) {
+    void setData(float[] x, float[] y) { setData(x, y, null); }
+
+    /** x in km, y in the chart's unit (NaN = no value); levels = assist level per sample for
+     *  Flow-coloured line segments (null = single metric colour). */
+    void setData(float[] x, float[] y, int[] levels) {
         int n = Math.min(x.length, y.length);
+        int[] ll = levels;
         int max = 900;
         if (n > max) {
             float[] nx = new float[max], ny = new float[max];
+            int[] nl = levels == null ? null : new int[max];
             for (int b = 0; b < max; b++) {
                 int a0 = (int) ((long) b * n / max), a1 = (int) ((long) (b + 1) * n / max);
-                double sx = 0, sy = 0;
+                double sy = 0;
                 int c = 0;
                 for (int i = a0; i < a1; i++) if (!Float.isNaN(y[i])) { sy += y[i]; c++; }
-                sx = x[Math.min(n - 1, (a0 + a1) / 2)];
-                nx[b] = (float) sx;
+                int mid = Math.min(n - 1, (a0 + a1) / 2);
+                nx[b] = x[mid];
                 ny[b] = c == 0 ? Float.NaN : (float) (sy / c);
+                if (nl != null) nl[b] = levels[mid];
             }
-            x = nx; y = ny; n = max;
+            x = nx; y = ny; ll = nl; n = max;
         }
-        xs = x; ys = y;
+        xs = x; ys = y; lv = ll;
         minY = Float.MAX_VALUE; maxY = -Float.MAX_VALUE; maxX = 0;
         double sum = 0;
         int cnt = 0;
@@ -153,7 +171,23 @@ final class ChartView extends View {
         if (pen) { area.lineTo(lastX, bottom); area.lineTo(firstX, bottom); area.close(); }
         fill.setShader(new LinearGradient(0, top, 0, bottom, (color & 0x00FFFFFF) | 0x55000000, (color & 0x00FFFFFF), Shader.TileMode.CLAMP));
         c.drawPath(area, fill);
-        c.drawPath(p, line);
+        if (lv == null) {
+            line.setColor(color);
+            c.drawPath(p, line);
+        } else {
+            // colour each segment by the assist level at that point (Flow colours)
+            boolean have = false;
+            float prevX = 0, prevY = 0;
+            for (int i = 0; i < xs.length; i++) {
+                float v = ys[i];
+                if (Float.isNaN(v) || Float.isNaN(xs[i])) { have = false; continue; }
+                float px = left + (right - left) * xs[i] / maxX;
+                float py = bottom - (bottom - top) * (v - minY) / (maxY - minY);
+                if (have) { line.setColor(levelColor(lv[i])); c.drawLine(prevX, prevY, px, py, line); }
+                prevX = px; prevY = py; have = true;
+            }
+            line.setColor(color);
+        }
 
         if (touch >= 0 && touch < xs.length) {
             float px = left + (right - left) * xs[touch] / maxX;

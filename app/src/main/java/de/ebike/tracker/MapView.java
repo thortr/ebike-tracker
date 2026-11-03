@@ -38,6 +38,7 @@ final class MapView extends View {
     private float vMin, vMax;
     private int n;
     private boolean satellite;
+    private boolean levelMode;   // colour the track by assist level (Flow colours) instead of a scale
     private double markLat = Double.NaN, markLon = Double.NaN;
     private boolean markActive;
 
@@ -98,7 +99,10 @@ final class MapView extends View {
         });
     }
 
-    void setData(RideStore.Samples s, float[] colorBy) {
+    void setData(RideStore.Samples s, float[] colorBy) { setData(s, colorBy, false); }
+
+    void setData(RideStore.Samples s, float[] colorBy, boolean byLevel) {
+        this.levelMode = byLevel;
         int c = 0;
         for (int i = 0; i < s.n; i++) if (!Double.isNaN(s.lat[i])) c++;
         lat = new double[c]; lon = new double[c]; val = new float[c];
@@ -317,6 +321,7 @@ final class MapView extends View {
     }
 
     private int colorFor(float v) {
+        if (levelMode) return Float.isNaN(v) ? ChartView.levelColor(-1) : ChartView.levelColor(Math.round(v));
         if (Float.isNaN(v) || vMax - vMin < 1e-3f) return Ui.ACCENT;
         float t = (v - vMin) / (vMax - vMin);
         t = Math.max(0, Math.min(1, t));
