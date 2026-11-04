@@ -93,7 +93,6 @@ public class RideDetailActivity extends BaseActivity {
         if (s.hasAny(s.alt)) metrics.add(new Metric("Höhe", "m", Ui.ALT, 0, s.alt));
         if (s.hasAny(s.speed)) metrics.add(new Metric("Tempo", "km/h", Ui.SPEED, 1, s.speed));
         if (s.hasAny(s.power)) metrics.add(new Metric("Leistung", "W", Ui.POWER, 0, toF(s.power, s.n, false)));
-        if (s.hasAny(s.power) && s.hasAny(s.assist)) metrics.add(new Metric("Motor", "W", Ui.ACCENT, 0, motorArray(s)));
         if (s.hasAny(s.hr)) metrics.add(new Metric("Puls", "bpm", Ui.HR, 0, toF(s.hr, s.n, true)));
         if (s.hasAny(s.cadence)) metrics.add(new Metric("Trittfr.", "/min", Ui.CAD, 0, toF(s.cadence, s.n, false)));
         if (s.hasAny(s.soc)) metrics.add(new Metric("Akku", "%", Ui.BATT, 0, toF(s.soc, s.n, false)));
@@ -242,8 +241,6 @@ public class RideDetailActivity extends BaseActivity {
             }
             if (!Float.isNaN(s.speed[i])) { sumSpd[a] += s.speed[i]; nSpd[a]++; }
             if (s.power[i] >= 0) { sumPw[a] += s.power[i]; nPw[a]++; }
-            int mo = s.power[i] >= 0 ? State.motorEstimate(s.power[i], a) : -1;
-            if (mo >= 0) { sumMo[a] += mo; nMo[a]++; }
         }
         for (int a = 0; a <= 4; a++) {
             if (time[a] < 1) continue;
@@ -254,10 +251,9 @@ public class RideDetailActivity extends BaseActivity {
             card.addView(Ui.text(this, "● " + names[a], 15, ChartView.levelColor(a == 0 ? -1 : a), true));
             String spd = nSpd[a] > 0 ? fmtNum(sumSpd[a] / nSpd[a], 1) + " km/h" : "–";
             String pw = nPw[a] > 0 ? fmtNum(sumPw[a] / nPw[a], 0) + " W" : "–";
-            String mo = nMo[a] > 0 ? fmtNum(sumMo[a] / nMo[a], 0) + " W" : "–";
             TextView v = Ui.text(this,
                     fmtNum(dist[a] / 1000, 2) + " km  ·  " + Ui.dur((long) (time[a] * 1000))
-                            + "\nØ Tempo " + spd + "  ·  Ø Fahrer " + pw + "  ·  Ø Motor " + mo,
+                            + "\nØ Tempo " + spd + "  ·  Ø Leistung " + pw,
                     13, Ui.MUTED, false);
             v.setPadding(0, Ui.dp(this, 3), 0, 0);
             card.addView(v);
