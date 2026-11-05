@@ -136,6 +136,23 @@ final class State {
         return Math.round(range * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
     }
 
+    /**
+     * Live remaining range in km. The bike only sends a254 (Turbo range) once in a while,
+     * so that figure freezes during a ride. As soon as we have a measured consumption from
+     * the battery drop (a few hundred metres into a recorded ride), we switch to an e-car
+     * style estimate — remaining charge ÷ Wh-per-km — which keeps dropping as you ride and
+     * reacts to how hard you're actually using the motor. Until then we show the bike's own
+     * (level-scaled) range so the tile is never empty.
+     */
+    int rangeNow() {
+        float whPerKm = consumptionWhPerKm();
+        if (soc >= 0 && !Float.isNaN(whPerKm) && whPerKm > 1f) {
+            float remainWh = soc / 100f * BATTERY_WH;
+            return Math.round(remainWh / whPerKm);
+        }
+        return rangeCurrent();
+    }
+
     // Average consumption since the ride started, in Wh/km (e-car style). Based on the
     // battery % drop and the PowerTube 750 capacity, which is more reliable than the raw
     // energy signal. Momentary consumption ≈ the (estimated) motor power.

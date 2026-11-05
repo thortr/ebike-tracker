@@ -246,7 +246,7 @@ public class MainActivity extends BaseActivity {
         gain.set(Ui.f0(s.gainM));
         batt.set(bike && s.soc >= 0 ? String.valueOf(s.soc) : "–");
         assist.set(bike && s.assist >= 0 ? String.valueOf(s.assist) : "–");
-        range.set(bike && s.rangeCurrent() >= 0 ? String.valueOf(s.rangeCurrent()) : "–");
+        range.set(bike && s.rangeNow() >= 0 ? String.valueOf(s.rangeNow()) : "–");
         float cons = s.consumptionWhPerKm();
         energy.set(!Float.isNaN(cons) ? Ui.f0(cons) : "–");
         motor.set(bike && s.motorNow(now) >= 0 ? String.valueOf(s.motorNow(now)) : "–");
