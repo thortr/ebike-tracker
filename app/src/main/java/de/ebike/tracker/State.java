@@ -56,8 +56,8 @@ final class State {
     double distM, gainM, lossM;
     float maxSpeed;
     int maxHr, maxPower;
-    double sumHr, sumPower, sumCad, sumMotor;
-    int nHr, nPower, nCad, nMotor;
+    double sumHr, sumPower, sumCad;
+    int nHr, nPower, nCad;
     int socStart = -1;
 
     void resetRide() {
@@ -65,8 +65,8 @@ final class State {
         startTime = 0; elapsedMs = 0; movingMs = 0;
         distM = 0; gainM = 0; lossM = 0;
         maxSpeed = 0; maxHr = 0; maxPower = 0;
-        sumHr = 0; sumPower = 0; sumCad = 0; sumMotor = 0;
-        nHr = 0; nPower = 0; nCad = 0; nMotor = 0;
+        sumHr = 0; sumPower = 0; sumCad = 0;
+        nHr = 0; nPower = 0; nCad = 0;
         socStart = -1;
     }
 
@@ -107,9 +107,9 @@ final class State {
     }
 
     // --- Real power (verified against Flow's .fit): 985b = rider, 985d = motor ------
-    // ASSIST_FACTOR is only used for the range scaling below. Recalibrated 2026-11-05
-    // against Flow's on-screen range per level (Turbo ≈ 51 km → S1 104, S2 85, Auto 80).
-    private static final float[] ASSIST_FACTOR = {0f, 1.15f, 1.64f, 1.79f, 3.4f};
+    // ASSIST_FACTOR is only used for the range scaling below. Calibrated 2026-11-05
+    // against Flow's on-screen range per level (Turbo ≈ 51 km → S1 104, S2 85, Auto 90, S4 51).
+    private static final float[] ASSIST_FACTOR = {0f, 1.16f, 1.64f, 1.49f, 3.4f};
 
     /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
      *  (coasting / not driven), -1 if no eBike. */
@@ -130,7 +130,7 @@ final class State {
     // current level the same way the display does:
     //   range(level) = rangeTurbo × (1 + f_turbo) / (1 + f_level)
     // Calibrated against Flow's own per-level range display (Nov 2026): at 51 km Turbo
-    // Flow showed ~104 km (S1), ~85 (S2), ~80 (Auto) – the ASSIST_FACTORs reproduce that.
+    // Flow showed ~104 (S1), ~85 (S2), ~90 (Auto), 51 (S4) – the ASSIST_FACTORs reproduce that.
     int rangeCurrent() {
         if (range < 0) return -1;
         int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
@@ -139,45 +139,26 @@ final class State {
     }
 
     /**
-     * Live remaining range in km. The bike only sends a254 (Turbo range) once in a while,
-     * so that figure freezes during a ride. As soon as we have a measured consumption from
-     * the battery drop (a few hundred metres into a recorded ride), we switch to an e-car
-     * style estimate — remaining charge ÷ Wh-per-km — which keeps dropping as you ride and
-     * reacts to how hard you're actually using the motor. Until then we show the bike's own
-     * (level-scaled) range so the tile is never empty.
+     * Remaining range in km for the selected assist level. We scale the bike's own a254
+     * (Turbo range), which already carries Bosch's terrain-aware consumption model and
+     * updates as the battery drains, so it stays correct on long rides too. A motor-power
+     * estimate was tried but needed a different calibration on every ride (terrain/wind
+     * dependent), so the bike's own figure is the reliable basis.
      */
     int rangeNow() {
-        float whPerKm = consumptionWhPerKm();
-        if (soc >= 0 && !Float.isNaN(whPerKm) && whPerKm > 1f) {
-            float remainWh = soc / 100f * BATTERY_WH;
-            return Math.round(remainWh / whPerKm);
-        }
         return rangeCurrent();
     }
 
     static final int BATTERY_WH = 750;
-    // Battery draw per km = a fixed base load (electronics, rolling/air drag the motor has
-    // to overcome regardless of assist) + the motor's own output scaled up for drivetrain
-    // and conversion losses. Calibrated against Flow's range (Nov 2026): fits S1 104 km,
-    // Auto ~90 km and Turbo 51 km together, which a single factor could not.
-    static final float BATTERY_BASE_WH_KM = 3.0f;
-    static final float MOTOR_TO_BATTERY = 1.11f;
 
     /**
-     * Average consumption since the ride started, in Wh/km (e-car style). Derived from the
-     * measured MOTOR power (985d) and distance, not from the battery %, so it updates from
-     * the first few hundred metres and automatically reflects however hard the motor is
-     * actually working — "Automatik" included, since that just changes the motor power.
+     * Consumption in Wh/km (e-car style), consistent with the range shown for the current
+     * level: remaining charge ÷ remaining range. This differs sensibly per assist level
+     * (little in Eco, a lot in Turbo) instead of showing nearly the same everywhere.
      */
     float consumptionWhPerKm() {
-        if (!bosch() || nMotor <= 0) return Float.NaN;
-        double km = distM / 1000.0;
-        double hrs = elapsedMs / 3_600_000.0;
-        if (km < 0.2 || hrs <= 0) return Float.NaN;
-        float avgMotor = (float) (sumMotor / nMotor);   // W, time-averaged over the ride
-        float avgSpeed = (float) (km / hrs);            // km/h, same period
-        if (avgSpeed < 1f) return Float.NaN;
-        float motorWhKm = avgMotor / avgSpeed;          // motor energy per km
-        return BATTERY_BASE_WH_KM + motorWhKm * MOTOR_TO_BATTERY;
+        int r = rangeCurrent();
+        if (!bosch() || r <= 0 || soc < 0) return Float.NaN;
+        return soc / 100f * BATTERY_WH / r;
     }
 }
