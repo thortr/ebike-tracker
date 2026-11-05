@@ -56,8 +56,8 @@ final class State {
     double distM, gainM, lossM;
     float maxSpeed;
     int maxHr, maxPower;
-    double sumHr, sumPower, sumCad;
-    int nHr, nPower, nCad;
+    double sumHr, sumPower, sumCad, sumMotor;
+    int nHr, nPower, nCad, nMotor;
     int socStart = -1;
 
     void resetRide() {
@@ -65,8 +65,8 @@ final class State {
         startTime = 0; elapsedMs = 0; movingMs = 0;
         distM = 0; gainM = 0; lossM = 0;
         maxSpeed = 0; maxHr = 0; maxPower = 0;
-        sumHr = 0; sumPower = 0; sumCad = 0;
-        nHr = 0; nPower = 0; nCad = 0;
+        sumHr = 0; sumPower = 0; sumCad = 0; sumMotor = 0;
+        nHr = 0; nPower = 0; nCad = 0; nMotor = 0;
         socStart = -1;
     }
 
@@ -107,8 +107,9 @@ final class State {
     }
 
     // --- Real power (verified against Flow's .fit): 985b = rider, 985d = motor ------
-    // ASSIST_FACTOR is only used for the range scaling below.
-    private static final float[] ASSIST_FACTOR = {0f, 0.6f, 1.4f, 2.4f, 3.4f};
+    // ASSIST_FACTOR is only used for the range scaling below. Recalibrated 2026-11-05
+    // against Flow's on-screen range per level (Turbo ≈ 51 km → S1 104, S2 85, Auto 80).
+    private static final float[] ASSIST_FACTOR = {0f, 1.15f, 1.64f, 1.79f, 3.4f};
 
     /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
      *  (coasting / not driven), -1 if no eBike. */
@@ -128,7 +129,8 @@ final class State {
     // with the selected level. The bike sends no per-level range, so we scale it to the
     // current level the same way the display does:
     //   range(level) = rangeTurbo × (1 + f_turbo) / (1 + f_level)
-    // Cross-checked against Flow: 38 km (Turbo) → 104 km in ECO, Flow showed ~106.
+    // Calibrated against Flow's own per-level range display (Nov 2026): at 51 km Turbo
+    // Flow showed ~104 km (S1), ~85 (S2), ~80 (Auto) – the ASSIST_FACTORs reproduce that.
     int rangeCurrent() {
         if (range < 0) return -1;
         int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
@@ -153,17 +155,29 @@ final class State {
         return rangeCurrent();
     }
 
-    // Average consumption since the ride started, in Wh/km (e-car style). Based on the
-    // battery % drop and the PowerTube 750 capacity, which is more reliable than the raw
-    // energy signal. Momentary consumption ≈ the (estimated) motor power.
     static final int BATTERY_WH = 750;
+    // Battery draw per km = a fixed base load (electronics, rolling/air drag the motor has
+    // to overcome regardless of assist) + the motor's own output scaled up for drivetrain
+    // and conversion losses. Calibrated against Flow's range (Nov 2026): fits S1 104 km,
+    // Auto ~90 km and Turbo 51 km together, which a single factor could not.
+    static final float BATTERY_BASE_WH_KM = 3.0f;
+    static final float MOTOR_TO_BATTERY = 1.11f;
 
+    /**
+     * Average consumption since the ride started, in Wh/km (e-car style). Derived from the
+     * measured MOTOR power (985d) and distance, not from the battery %, so it updates from
+     * the first few hundred metres and automatically reflects however hard the motor is
+     * actually working — "Automatik" included, since that just changes the motor power.
+     */
     float consumptionWhPerKm() {
-        if (!bosch() || socStart < 0 || soc < 0) return Float.NaN;
+        if (!bosch() || nMotor <= 0) return Float.NaN;
         double km = distM / 1000.0;
-        if (km < 0.1) return Float.NaN;
-        float used = (socStart - soc) / 100f * BATTERY_WH;
-        if (used <= 0) return Float.NaN;
-        return (float) (used / km);
+        double hrs = elapsedMs / 3_600_000.0;
+        if (km < 0.2 || hrs <= 0) return Float.NaN;
+        float avgMotor = (float) (sumMotor / nMotor);   // W, time-averaged over the ride
+        float avgSpeed = (float) (km / hrs);            // km/h, same period
+        if (avgSpeed < 1f) return Float.NaN;
+        float motorWhKm = avgMotor / avgSpeed;          // motor energy per km
+        return BATTERY_BASE_WH_KM + motorWhKm * MOTOR_TO_BATTERY;
     }
 }

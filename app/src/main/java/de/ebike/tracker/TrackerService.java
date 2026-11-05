@@ -390,6 +390,8 @@ public class TrackerService extends Service implements LocationListener, SensorE
                 if (moving) { s.sumPower += pw; s.nPower++; }
                 s.maxPower = Math.max(s.maxPower, pw);
             }
+            int mo = s.motorNow(now);
+            if (mo >= 0) { s.sumMotor += mo; s.nMotor++; }  // whole elapsed period, for Wh/km
             if (cad > 0) { s.sumCad += cad; s.nCad++; }
             if (s.socStart < 0 && bike && s.soc >= 0) s.socStart = s.soc;
 
