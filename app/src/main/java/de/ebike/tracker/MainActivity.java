@@ -19,7 +19,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class MainActivity extends BaseActivity {
-    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed, assist, range, energy;
+    private Tile speed, time, dist, hr, power, cad, avgSpeed, alt, gain, batt, avgPower, maxSpeed, assist, range, energy, motor, total;
     private TextView chipGps, chipHr, chipBike, status, hint;
     private Button start, pause, stop;
     private LinearLayout idleRow, recRow;
@@ -87,6 +87,9 @@ public class MainActivity extends BaseActivity {
         range = new Tile(this, "Reichweite", "km", Ui.BATT, 34);
         energy = new Tile(this, "Verbrauch", "Wh/km", Ui.BATT, 34);
         addRow(grid, range, energy);
+        motor = new Tile(this, "Motor", "W", Ui.ACCENT, 40);
+        total = new Tile(this, "Gesamt", "W", Ui.POWER, 34);
+        addRow(grid, motor, total);
 
         hint = Ui.text(this, "", 13, Ui.WARN, false);
         hint.setPadding(Ui.dp(this, 8), Ui.dp(this, 8), Ui.dp(this, 8), 0);
@@ -246,6 +249,8 @@ public class MainActivity extends BaseActivity {
         range.set(bike && s.rangeCurrent() >= 0 ? String.valueOf(s.rangeCurrent()) : "–");
         float cons = s.consumptionWhPerKm();
         energy.set(!Float.isNaN(cons) ? Ui.f0(cons) : "–");
+        motor.set(bike && s.motorNow(now) >= 0 ? String.valueOf(s.motorNow(now)) : "–");
+        total.set(bike && s.totalNow(now) >= 0 ? String.valueOf(s.totalNow(now)) : "–");
 
         String st;
         if (s.recording) st = s.paused ? "Pausiert" : "● Aufzeichnung läuft";

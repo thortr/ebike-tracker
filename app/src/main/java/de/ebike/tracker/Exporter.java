@@ -62,7 +62,7 @@ final class Exporter {
         // Same columns as stored, plus a readable local time, ';' separated for German Excel.
         SimpleDateFormat local = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss", Locale.GERMANY);
         StringBuilder b = new StringBuilder();
-        b.append("Zeit;Breite;Länge;Höhe m;Tempo km/h;Puls bpm;Leistung W;Trittfrequenz U/min;Tempo eBike km/h;Akku %;Kilometerstand m;Distanz m;Tempo GPS m/s;GPS-Genauigkeit m;Unterstützung\n");
+        b.append("Zeit;Breite;Länge;Höhe m;Tempo km/h;Puls bpm;Leistung W;Trittfrequenz U/min;Tempo eBike km/h;Akku %;Kilometerstand m;Distanz m;Tempo GPS m/s;GPS-Genauigkeit m;Unterstützung;Motor W\n");
         try (BufferedReader rd = new BufferedReader(new FileReader(r.csv))) {
             String line = rd.readLine();
             while ((line = rd.readLine()) != null) {

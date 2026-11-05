@@ -26,10 +26,11 @@ final class State {
     long hrTime;
 
     // Bosch Live Data Interface
-    int power = -1, cadence = -1, soc = -1, light = 0, assist = -1;
+    // power = RIDER power (signal 985b, verified against Flow); motorPower = MOTOR power (985d).
+    int power = -1, motorPower = -1, cadence = -1, soc = -1, light = 0, assist = -1;
     float bikeSpeed = Float.NaN, brightness = Float.NaN;
     long odo = -1, bikeClock, boschTime;
-    long bikeSpeedTime, cadTime, powerTime;
+    long bikeSpeedTime, cadTime, powerTime, motorTime;
     boolean locked, charger, notDriving;
 
     // --- additional reverse-engineered signals from the private 0011 channel ---
@@ -105,32 +106,22 @@ final class State {
         return power >= 0 && now - powerTime < FRESH ? power : 0;
     }
 
-    // --- Estimated motor assistance -----------------------------------------
-    // The Bosch interface exposes no measured motor power, so we estimate it the
-    // way the Flow app's graphic does: rider power x the support factor of the
-    // current assist level, capped at the motor's 600 W maximum (from signal 9874).
-    // Factors are the Performance Line CX defaults (OFF/ECO/TOUR+/AUTO/TURBO);
-    // the bike doesn't send the per-level settings, so these are fixed estimates.
+    // --- Real power (verified against Flow's .fit): 985b = rider, 985d = motor ------
+    // ASSIST_FACTOR is only used for the range scaling below.
     private static final float[] ASSIST_FACTOR = {0f, 0.6f, 1.4f, 2.4f, 3.4f};
-    static final int MOTOR_MAX_W = 600;
 
-    int motorPowerEst(long now) {
-        return motorEstimate(powerNow(now), assist);
+    /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
+     *  (coasting / not driven), -1 if no eBike. */
+    int motorNow(long now) {
+        if (!bosch()) return -1;
+        return motorPower >= 0 && now - motorTime < FRESH ? motorPower : 0;
     }
 
-    /** Estimated motor power (W) from rider power and assist level; -1 if no rider power.
-     *  Used live and when charting a recorded ride. */
-    static int motorEstimate(int riderPower, int assistLvl) {
-        if (riderPower < 0) return -1;
-        int lvl = (assistLvl >= 0 && assistLvl < ASSIST_FACTOR.length) ? assistLvl : 0;
-        return Math.min(Math.round(riderPower * ASSIST_FACTOR[lvl]), MOTOR_MAX_W);
-    }
-
-    int totalPowerEst(long now) {
-        int rp = powerNow(now);
-        if (rp < 0) return -1;
-        int m = motorPowerEst(now);
-        return rp + (m < 0 ? 0 : m);
+    /** Rider + motor power (W), -1 if no eBike. */
+    int totalNow(long now) {
+        int r = powerNow(now), m = motorNow(now);
+        if (r < 0 && m < 0) return -1;
+        return (r < 0 ? 0 : r) + (m < 0 ? 0 : m);
     }
 
     // a254 (field `range`) is the range for MAXIMUM assist (Turbo) – it doesn't change

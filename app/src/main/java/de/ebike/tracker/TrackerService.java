@@ -372,11 +372,12 @@ public class TrackerService extends Service implements LocationListener, SensorE
             }
             s.distM += odoD >= 0 ? odoD : gpsD;
 
-            // Altitude is noisy (GPS especially), so only count a sustained change of 5 m
-            // from the last reference point. The smoothing above removes most of the jitter;
-            // together this keeps a flat ride near 0 m of gain.
+            // Altitude needs a settling period: the barometer/GPS altitude drifts toward its
+            // true value over the first ~1-2 min after start (e.g. 23 m → 34 m here), which is
+            // not real climbing. So for the first 90 s we only follow the altitude (reference
+            // tracks it, no gain). After that, count a sustained change of 5 m as gain/loss.
             if (!Double.isNaN(alt)) {
-                if (Double.isNaN(refAlt)) refAlt = alt;
+                if (Double.isNaN(refAlt) || s.elapsedMs < 90_000) refAlt = alt;
                 else if (alt - refAlt >= 5) { s.gainM += alt - refAlt; refAlt = alt; }
                 else if (refAlt - alt >= 5) { s.lossM += refAlt - alt; refAlt = alt; }
             }
@@ -396,7 +397,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
                     gps ? s.lat : Double.NaN, gps ? s.lon : Double.NaN, alt, spd, hrv, pw, cad,
                     bike ? s.bikeSpeed : Float.NaN, bike ? s.soc : -1, bike ? s.odo : -1,
                     s.distM, gps ? s.gpsSpeed : Float.NaN, gps ? s.acc : Float.NaN,
-                    bike ? s.assist : -1);
+                    bike ? s.assist : -1, bike ? s.motorNow(now) : -1);
         }
         if (tickCount % 5 == 0) updateNotification();
     }

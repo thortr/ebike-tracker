@@ -28,6 +28,9 @@ import java.util.UUID;
  *   a24a/a24b = avg/max rider power · 9815/9814 = rider/motor torque (experimental)
  */
 final class BikeLink {
+    // Rider-power calibration: signal 985b reads ~1.1x Flow's rider power, so scale to match.
+    static final float RIDER_CAL = 0.9f;
+
     static final UUID SVC = UUID.fromString("00000010-eaa2-11e9-81b4-2a2ae2dbcce4");
     static final UUID CHR = UUID.fromString("00000011-eaa2-11e9-81b4-2a2ae2dbcce4");
     static final UUID CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
@@ -179,7 +182,10 @@ final class BikeLink {
                         switch (key) {
                             // --- live values ---
                             case 0x9808: s.bikeSpeed = v / 100f; s.bikeSpeedTime = now; break;
-                            case 0x985d: s.power = v; s.powerTime = now; break;
+                            // 985b = RIDER power (verified vs Flow; 985b ≈ 1.1x Flow, so x0.9 to match)
+                            case 0x985b: s.power = Math.round(v * RIDER_CAL); s.powerTime = now; break;
+                            // 985d = MOTOR power in watts (real, not an estimate)
+                            case 0x985d: s.motorPower = v; s.motorTime = now; break;
                             case 0x985a: s.cadence = v / 2; s.cadTime = now; break;
                             case 0x9809: s.assist = v; break;
                             case 0x9818: s.odo = v; break;
