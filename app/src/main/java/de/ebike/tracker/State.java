@@ -92,7 +92,14 @@ final class State {
             if (!Float.isNaN(bikeSpeed) && now - bikeSpeedTime < FRESH) return bikeSpeed;
             return 0f;
         }
-        if (gpsFresh(now) && !Float.isNaN(gpsSpeed)) return gpsSpeed * 3.6f;
+        if (gpsFresh(now) && !Float.isNaN(gpsSpeed)) {
+            float kmh = gpsSpeed * 3.6f;
+            // A stationary phone still reports a few km/h of GPS "speed", worse on the weak,
+            // short-lived fixes you get indoors. Treat a small speed or a poor fix as standing.
+            if (kmh < 3f) return 0f;
+            if (!Float.isNaN(acc) && acc > 30f) return 0f;
+            return kmh;
+        }
         return Float.NaN;
     }
 
