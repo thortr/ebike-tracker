@@ -34,8 +34,10 @@ final class State {
     boolean locked, charger, notDriving;
 
     // --- additional reverse-engineered signals from the private 0011 channel ---
-    // Range estimate for the current assist level, in km (a254). Persists.
+    // Range the bike reports in km (a254). Raw value jumps (esp. in the cold); rangeSmooth is
+    // the time-smoothed version actually used for the display. Persists.
     int range = -1;
+    float rangeSmooth = Float.NaN;
     // Remaining battery energy, Wh (8091 / 10). Persists.
     float energyWh = Float.NaN;
     // Trip values the bike itself keeps (its "Tagesfahrt"). The app also has its
@@ -132,10 +134,11 @@ final class State {
     // Calibrated against Flow's own per-level range display (Nov 2026): at 51 km Turbo
     // Flow showed ~104 (S1), ~85 (S2), ~90 (Auto), 51 (S4) – the ASSIST_FACTORs reproduce that.
     int rangeCurrent() {
-        if (range < 0) return -1;
+        float base = !Float.isNaN(rangeSmooth) ? rangeSmooth : range;
+        if (base < 0) return -1;
         int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
         float fTurbo = ASSIST_FACTOR[ASSIST_FACTOR.length - 1];
-        return Math.round(range * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
+        return Math.round(base * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
     }
 
     /**

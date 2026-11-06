@@ -333,6 +333,10 @@ public class TrackerService extends Service implements LocationListener, SensorE
             altSmooth = Double.isNaN(altSmooth) ? altRaw : altSmooth + 0.08 * (altRaw - altSmooth);
         double alt = altSmooth;
         s.alt = alt;
+        // The bike's raw range (a254) jumps several km at a time, especially in the cold.
+        // Smooth it over ~80 s so the Reichweite tile rises/falls gradually like Flow does.
+        if (s.range >= 0)
+            s.rangeSmooth = Float.isNaN(s.rangeSmooth) ? s.range : s.rangeSmooth + 0.012f * (s.range - s.rangeSmooth);
         long dt = Math.min(2000, Math.max(0, now - lastTick));
         lastTick = now;
         tickCount++;
@@ -404,7 +408,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
                     gps ? s.lat : Double.NaN, gps ? s.lon : Double.NaN, alt, spd, hrv, pw, cad,
                     bike ? s.bikeSpeed : Float.NaN, bike ? s.soc : -1, bike ? s.odo : -1,
                     s.distM, gps ? s.gpsSpeed : Float.NaN, gps ? s.acc : Float.NaN,
-                    bike ? s.assist : -1, bike ? s.motorNow(now) : -1);
+                    bike ? s.assist : -1, bike ? s.motorNow(now) : -1, bike ? s.range : -1);
         }
         if (tickCount % 5 == 0) updateNotification();
     }
