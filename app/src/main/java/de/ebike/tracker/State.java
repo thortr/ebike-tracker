@@ -109,9 +109,10 @@ final class State {
     }
 
     // --- Real power (verified against Flow's .fit): 985b = rider, 985d = motor ------
-    // ASSIST_FACTOR is only used for the range scaling below. Calibrated 2026-11-05
-    // against Flow's on-screen range per level (Turbo ≈ 51 km → S1 104, S2 85, Auto 90, S4 51).
-    private static final float[] ASSIST_FACTOR = {0f, 1.16f, 1.64f, 1.49f, 3.4f};
+    // ASSIST_FACTOR is only used for the range scaling below. Calibrated 2026-11-06 against
+    // Flow's "Geschätzte Reichweite" screen (standing, ~60% battery): Turbo 53 km → ECO 112,
+    // Tour+ 87, Auto 82. These factors reproduce exactly those ratios (a254 scaled per level).
+    private static final float[] ASSIST_FACTOR = {0f, 1.08f, 1.68f, 1.84f, 3.4f};
 
     /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
      *  (coasting / not driven), -1 if no eBike. */
@@ -131,8 +132,8 @@ final class State {
     // with the selected level. The bike sends no per-level range, so we scale it to the
     // current level the same way the display does:
     //   range(level) = rangeTurbo × (1 + f_turbo) / (1 + f_level)
-    // Calibrated against Flow's own per-level range display (Nov 2026): at 51 km Turbo
-    // Flow showed ~104 (S1), ~85 (S2), ~90 (Auto), 51 (S4) – the ASSIST_FACTORs reproduce that.
+    // Calibrated against Flow's own "Geschätzte Reichweite" screen (Nov 2026): at 53 km Turbo
+    // Flow showed 112 (ECO), 87 (Tour+), 82 (Auto) – the ASSIST_FACTORs reproduce that exactly.
     int rangeCurrent() {
         float base = !Float.isNaN(rangeSmooth) ? rangeSmooth : range;
         if (base < 0) return -1;
