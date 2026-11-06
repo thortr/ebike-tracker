@@ -113,7 +113,27 @@ final class RideStore {
                 s.n++;
             }
         }
+        smoothAltitude(s);
         return s;
+    }
+
+    /** Barometric altitude picks up a few metres of slow wander from wind and weather while
+     *  riding. Flatten the stored profile with a centred moving average (~±20 s) so the chart
+     *  and the climb total stay realistic on flat ground; real hills last minutes and survive. */
+    static void smoothAltitude(Samples s) {
+        int n = s.n;
+        if (n < 5) return;
+        final int R = 10;                 // ±10 samples ≈ 20 s at 1 Hz
+        float[] out = new float[n];
+        for (int i = 0; i < n; i++) {
+            double sum = 0; int cnt = 0;
+            int lo = Math.max(0, i - R), hi = Math.min(n - 1, i + R);
+            for (int j = lo; j <= hi; j++) {
+                if (!Float.isNaN(s.alt[j])) { sum += s.alt[j]; cnt++; }
+            }
+            out[i] = cnt > 0 ? (float) (sum / cnt) : Float.NaN;
+        }
+        System.arraycopy(out, 0, s.alt, 0, n);
     }
 
     private static long parseLong(String v) {

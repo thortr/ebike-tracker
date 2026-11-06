@@ -48,6 +48,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
 
     private float pressure = Float.NaN;
     private double baroOffset = Double.NaN;
+    private int offsetLocks = 0;
     private double altSmooth = Double.NaN;
     private double gpsMsl = Double.NaN;
     private long gpsAltTime;
@@ -196,7 +197,13 @@ public class TrackerService extends Service implements LocationListener, SensorE
                 double baroAlt = baroAltitude();
                 if (!Double.isNaN(baroAlt)) {
                     double diff = alt - baroAlt;
-                    baroOffset = Double.isNaN(baroOffset) ? diff : baroOffset + 0.02 * (diff - baroOffset);
+                    // Sensor fusion: GPS calibrates the absolute altitude, the barometer carries the
+                    // fine profile. Converge fast for the first ~30 fixes so a poor initial GPS
+                    // reading is corrected within seconds, then track slowly so only real weather
+                    // drift is followed and the barometer keeps leading the profile (no GPS sawtooth).
+                    double a = offsetLocks < 30 ? 0.1 : 0.02;
+                    baroOffset = Double.isNaN(baroOffset) ? diff : baroOffset + a * (diff - baroOffset);
+                    offsetLocks++;
                 }
             }
         }
