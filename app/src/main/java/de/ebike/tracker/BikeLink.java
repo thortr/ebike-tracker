@@ -195,7 +195,7 @@ final class BikeLink {
                             case 0x9814: s.motorTorque = v; break;   // motor torque curve
                             case 0x8091: s.energyWh = v / 10f; break; // remaining energy, Wh
                             // --- range / trip totals the bike keeps ---
-                            case 0xa254: s.range = v; break;         // remaining range, km
+                            case 0xa254: s.range = v; break;         // a range-like value (NOT what Flow shows; see 9857)
                             case 0xa243: s.tripTimeS = v; break;     // trip time, s
                             case 0xa251: s.tripDist = v; break;      // trip distance
                             // --- trip statistics (verified against Flow) ---
@@ -206,6 +206,28 @@ final class BikeLink {
                             case 0xa24a: s.trAvgPower = v; break;
                             case 0xa24b: s.trMaxPower = v; break;
                             default: break;
+                        }
+                    }
+                } else if (tag != null && tag[0] == 0x0a && key == 0x9857) {
+                    // 9857 is a packed LIST: remaining range per assist mode in km, in the order
+                    // [ECO, TOUR+, AUTO, TURBO] – exactly what Flow shows on its "Geschätzte
+                    // Reichweite" screen (verified: [112, 87, 82, 53] = Flow screenshot). The bike
+                    // sends it ~20 s after connecting and whenever a value changes.
+                    long[] len = vInt(p, (int) tag[1], end);
+                    if (len != null) {
+                        int j = (int) len[1];
+                        int stop = (int) Math.min(end, j + len[0]);
+                        int[] tmp = new int[8];
+                        int n = 0;
+                        while (j < stop && n < tmp.length) {
+                            long[] v = vInt(p, j, stop);
+                            if (v == null) break;
+                            tmp[n++] = (int) v[0];
+                            j = (int) v[1];
+                        }
+                        if (n > 0) {
+                            s.modeRange = java.util.Arrays.copyOf(tmp, n);
+                            got = true;
                         }
                     }
                 }
