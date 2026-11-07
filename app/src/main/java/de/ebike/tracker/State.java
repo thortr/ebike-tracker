@@ -34,10 +34,12 @@ final class State {
     boolean locked, charger, notDriving;
 
     // --- additional reverse-engineered signals from the private 0011 channel ---
-    // Range the bike reports in km (a254). Raw value jumps (esp. in the cold); rangeSmooth is
-    // the time-smoothed version actually used for the display. Persists.
+    // a254: a range-like value the bike sends while riding. It does NOT match Flow's range and
+    // is no longer used for the display (kept for diagnostics). Persists.
     int range = -1;
-    float rangeSmooth = Float.NaN;
+    // 9857: remaining range per assist mode in km, [ECO, TOUR+, AUTO, TURBO] – the exact values
+    // Flow shows. null until the bike has sent it (~20 s after connecting). Persists.
+    int[] modeRange;
     // Remaining battery energy, Wh (8091 / 10). Persists.
     float energyWh = Float.NaN;
     // Trip values the bike itself keeps (its "Tagesfahrt"). The app also has its
@@ -115,12 +117,6 @@ final class State {
         return power >= 0 && now - powerTime < FRESH ? power : 0;
     }
 
-    // --- Real power (verified against Flow's .fit): 985b = rider, 985d = motor ------
-    // ASSIST_FACTOR is only used for the range scaling below. Calibrated 2026-11-06 against
-    // Flow's "Geschätzte Reichweite" screen (standing, ~60% battery): Turbo 53 km → ECO 112,
-    // Tour+ 87, Auto 82. These factors reproduce exactly those ratios (a254 scaled per level).
-    private static final float[] ASSIST_FACTOR = {0f, 1.08f, 1.68f, 1.84f, 3.4f};
-
     /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
      *  (coasting / not driven), -1 if no eBike. */
     int motorNow(long now) {
@@ -135,27 +131,15 @@ final class State {
         return (r < 0 ? 0 : r) + (m < 0 ? 0 : m);
     }
 
-    // a254 (field `range`) is the range for MAXIMUM assist (Turbo) – it doesn't change
-    // with the selected level. The bike sends no per-level range, so we scale it to the
-    // current level the same way the display does:
-    //   range(level) = rangeTurbo × (1 + f_turbo) / (1 + f_level)
-    // Calibrated against Flow's own "Geschätzte Reichweite" screen (Nov 2026): at 53 km Turbo
-    // Flow showed 112 (ECO), 87 (Tour+), 82 (Auto) – the ASSIST_FACTORs reproduce that exactly.
+    /** Remaining range (km) for the selected assist level, taken straight from the bike's own
+     *  per-mode range list (9857) – the same number Flow shows. No estimation or scaling.
+     *  -1 until the bike has sent the list, or if no assist level is selected. */
     int rangeCurrent() {
-        float base = !Float.isNaN(rangeSmooth) ? rangeSmooth : range;
-        if (base < 0) return -1;
-        int lvl = (assist >= 0 && assist < ASSIST_FACTOR.length) ? assist : 0;
-        float fTurbo = ASSIST_FACTOR[ASSIST_FACTOR.length - 1];
-        return Math.round(base * (1 + fTurbo) / (1 + ASSIST_FACTOR[lvl]));
+        if (modeRange == null || assist < 1 || assist > modeRange.length) return -1;
+        return modeRange[assist - 1];
     }
 
-    /**
-     * Remaining range in km for the selected assist level. We scale the bike's own a254
-     * (Turbo range), which already carries Bosch's terrain-aware consumption model and
-     * updates as the battery drains, so it stays correct on long rides too. A motor-power
-     * estimate was tried but needed a different calibration on every ride (terrain/wind
-     * dependent), so the bike's own figure is the reliable basis.
-     */
+    /** Remaining range in km for the selected assist level (see rangeCurrent). */
     int rangeNow() {
         return rangeCurrent();
     }
