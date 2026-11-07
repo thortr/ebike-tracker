@@ -81,9 +81,22 @@ final class State {
     /** The bike only sends changes, so a value is valid as long as the link is up. */
     boolean bosch() { return boschStatus == ON; }
 
-    // These three change only while riding; the bike stops sending them when they
-    // stop, so a stale value means "standing / not pedalling" → fall back to 0.
+    // Speed is sent every ~0.5 s while the wheel turns, so 2.5 s without a value = standing.
     private static final long FRESH = 2500;
+    // Cadence and power are sent only when they CHANGE (median every 2 s, at steady pedalling
+    // gaps of up to ~9 s), and "0" arrives as an explicit (empty) record. So the last value
+    // stays valid until a new one comes; this long timeout is only a safety net for a lost
+    // packet. The old 2.5 s rule showed cadence 0 in 30–40 % of pedalling time.
+    private static final long HOLD = 15000;
+
+    /** Last value of a change-only signal: valid until replaced, 0 when the bike stands
+     *  (in case the bike's own "0" got lost) or after the safety timeout, -1 if no eBike. */
+    private int held(int v, long t, long now) {
+        if (!bosch()) return -1;
+        if (v < 0 || now - t >= HOLD) return 0;
+        if (now - bikeSpeedTime >= FRESH || bikeSpeed <= 0f) return 0;   // standing still
+        return v;
+    }
 
     float speedKmh(long now) {
         // When the eBike is connected its wheel speed is authoritative. The bike stops
@@ -105,24 +118,14 @@ final class State {
         return Float.NaN;
     }
 
-    /** Current cadence: the value if fresh, 0 if the link is up but nothing came for
-     *  a while (not pedalling), -1 if no eBike. */
-    int cadenceNow(long now) {
-        if (!bosch()) return -1;
-        return cadence >= 0 && now - cadTime < FRESH ? cadence : 0;
-    }
+    /** Current cadence (rpm), see held(). */
+    int cadenceNow(long now) { return held(cadence, cadTime, now); }
 
-    int powerNow(long now) {
-        if (!bosch()) return -1;
-        return power >= 0 && now - powerTime < FRESH ? power : 0;
-    }
+    /** Current rider power (W), see held(). */
+    int powerNow(long now) { return held(power, powerTime, now); }
 
-    /** Motor power (W): value if fresh, 0 if the link is up but nothing came for a while
-     *  (coasting / not driven), -1 if no eBike. */
-    int motorNow(long now) {
-        if (!bosch()) return -1;
-        return motorPower >= 0 && now - motorTime < FRESH ? motorPower : 0;
-    }
+    /** Current motor power (W), see held(). */
+    int motorNow(long now) { return held(motorPower, motorTime, now); }
 
     /** Rider + motor power (W), -1 if no eBike. */
     int totalNow(long now) {

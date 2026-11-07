@@ -28,9 +28,9 @@ import java.util.UUID;
  *   a24a/a24b = avg/max rider power · 9815/9814 = rider/motor torque (experimental)
  */
 final class BikeLink {
-    // Rider-power calibration: signal 985b runs ~1.0–1.1x Flow's rider power across rides,
-    // so 0.95 keeps both ends within ~5%.
-    static final float RIDER_CAL = 0.95f;
+    // Rider-power calibration: on two clean rides (7.11., after fixing the dropouts) signal 985b
+    // read 1.027x and 1.029x Flow's rider power, so 0.97 puts both within ±0.5%.
+    static final float RIDER_CAL = 0.97f;
 
     static final UUID SVC = UUID.fromString("00000010-eaa2-11e9-81b4-2a2ae2dbcce4");
     static final UUID CHR = UUID.fromString("00000011-eaa2-11e9-81b4-2a2ae2dbcce4");
@@ -171,11 +171,16 @@ final class BikeLink {
             if ((p[i] & 0xff) != 0x30) break;
             int ln = p[i + 1] & 0xff, start = i + 2, end = start + ln;
             if (end > p.length) break;
-            if (ln >= 3) {
+            if (ln >= 2) {
                 int key = ((p[start] & 0xff) << 8) | (p[start + 1] & 0xff);
-                long[] tag = vInt(p, start + 2, end);
-                if (tag != null && tag[0] == 0x08) {
-                    long[] val = vInt(p, (int) tag[1], end);
+                long[] tag = ln >= 3 ? vInt(p, start + 2, end) : null;
+                // Protobuf leaves out a field whose value is 0, so the bike sends "0" as an EMPTY
+                // record (just the key, e.g. 30 02 98 5a = cadence 0). Only live values are taken
+                // this way; totals like the odometer are never legitimately 0.
+                boolean zero = ln == 2 && (key == 0x9808 || key == 0x985a || key == 0x985b
+                        || key == 0x985d || key == 0x9809 || key == 0x9814 || key == 0x9815);
+                if (zero || (tag != null && tag[0] == 0x08)) {
+                    long[] val = zero ? new long[]{0, 0} : vInt(p, (int) tag[1], end);
                     if (val != null) {
                         int v = (int) val[0];
                         got = true;
@@ -183,7 +188,7 @@ final class BikeLink {
                         switch (key) {
                             // --- live values ---
                             case 0x9808: s.bikeSpeed = v / 100f; s.bikeSpeedTime = now; break;
-                            // 985b = RIDER power (verified vs Flow; 985b ≈ 1.1x Flow, so x0.9 to match)
+                            // 985b = RIDER power (verified vs Flow .fit; see RIDER_CAL)
                             case 0x985b: s.power = Math.round(v * RIDER_CAL); s.powerTime = now; break;
                             // 985d = MOTOR power in watts (real, not an estimate)
                             case 0x985d: s.motorPower = v; s.motorTime = now; break;
