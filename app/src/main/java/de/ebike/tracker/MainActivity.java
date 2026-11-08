@@ -232,15 +232,17 @@ public class MainActivity extends BaseActivity {
 
         float spd = Float.isNaN(s.dispSpeed) ? s.speedKmh(now) : s.dispSpeed;
         speed.set(Float.isNaN(spd) ? "–" : Ui.f1(spd));
-        time.set(Ui.dur(s.elapsedMs));
+        // With auto-pause the clock and the average speed use riding time only (like adidas/Flow).
+        long rideMs = s.autoPause ? s.movingMs : s.elapsedMs;
+        time.set(Ui.dur(rideMs));
         dist.set(Ui.f2(s.distM / 1000));
         hr.set(s.hrFresh(now) ? String.valueOf(s.hr) : "–");
         boolean bike = s.bosch();
-        int dp = s.dispPower >= 0 ? s.dispPower : s.powerNow(now);
-        power.set(dp >= 0 ? String.valueOf(dp) : "–");
+        int pw = s.powerNow(now);
+        power.set(pw >= 0 ? String.valueOf(pw) : "–");
         cad.set(s.cadenceNow(now) >= 0 ? String.valueOf(s.cadenceNow(now)) : "–");
         avgPower.set(s.nPower > 0 ? Ui.f0(s.sumPower / s.nPower) : "–");
-        avgSpeed.set(s.movingMs > 0 ? Ui.f1(s.distM / (s.movingMs / 1000.0) * 3.6) : "–");
+        avgSpeed.set(rideMs > 0 ? Ui.f1(s.distM / (rideMs / 1000.0) * 3.6) : "–");
         maxSpeed.set(s.maxSpeed > 0 ? Ui.f1(s.maxSpeed) : "–");
         alt.set(Double.isNaN(s.alt) ? "–" : Ui.f0(s.alt));
         gain.set(Ui.f0(s.gainM));
@@ -253,11 +255,13 @@ public class MainActivity extends BaseActivity {
         total.set(bike && s.totalNow(now) >= 0 ? String.valueOf(s.totalNow(now)) : "–");
 
         String st;
-        if (s.recording) st = s.paused ? "Pausiert" : "● Aufzeichnung läuft";
+        boolean standing = Float.isNaN(spd) || spd < RideStore.MOVING_KMH;
+        if (s.recording) st = s.paused ? "Pausiert"
+                : (s.autoPause && standing ? "❚❚ Auto-Pause (Stillstand)" : "● Aufzeichnung läuft");
         else st = "Bereit";
         st += "   ·   " + s.gpsMsg + "   ·   " + s.hrMsg + "   ·   eBike: " + s.boschMsg;
         status.setText(st);
-        status.setTextColor(s.recording && !s.paused ? Ui.ACCENT : Ui.MUTED);
+        status.setTextColor(s.recording && !s.paused && !(s.autoPause && standing) ? Ui.ACCENT : Ui.MUTED);
 
         String h = "";
         if (TrackerService.instance == null) h = "Bitte Standort- und Bluetooth-Zugriff erlauben, damit die Sensoren starten.";

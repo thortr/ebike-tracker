@@ -17,9 +17,10 @@ final class State {
     long gpsTime;
     boolean hasBaro;
 
-    // Smoothed values for the live display (raw GPS/bike data jitters a lot).
+    // Lightly smoothed speed for the live display.
     float dispSpeed = Float.NaN;
-    int dispPower = -1;
+    // Setting "Auto-Pause im Stillstand", mirrored here for the live display.
+    boolean autoPause = true;
 
     // heart rate
     int hr = -1;

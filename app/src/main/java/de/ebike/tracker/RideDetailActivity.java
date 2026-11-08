@@ -27,15 +27,19 @@ public class RideDetailActivity extends BaseActivity {
     private final java.util.List<TextView> chips = new java.util.ArrayList<>();
     private float[] xKm;
     private int[] levels;   // assist level per sample, or null if the ride has none
+    private boolean pause;  // auto-pause: leave standing time out of charts and averages
 
-    /** One selectable series: name, unit, colour, decimals and the per-sample values. */
+    /** One selectable series: name, unit, colour, decimals and the per-sample values.
+     *  idleZero: 0 means "not pedalling", so it is left out of the average (like Flow). */
     private static final class Metric {
         final String name, unit;
         final int color, dec;
         final float[] y;
+        boolean idleZero;
         Metric(String name, String unit, int color, int dec, float[] y) {
             this.name = name; this.unit = unit; this.color = color; this.dec = dec; this.y = y;
         }
+        Metric idleZero() { idleZero = true; return this; }
     }
 
     @Override
@@ -57,10 +61,11 @@ public class RideDetailActivity extends BaseActivity {
         File f = new File(path);
         TextView loading = Ui.text(this, "Lade Fahrt …", 15, Ui.MUTED, false);
         body.addView(loading);
+        pause = RideStore.pause(this);
         new Thread(() -> {
             try {
                 RideStore.Samples s = RideStore.load(f);
-                RideStore.Ride r = RideStore.summarize(f, s);
+                RideStore.Ride r = RideStore.summarize(f, s, pause);
                 runOnUiThread(() -> { samples = s; ride = r; build(); });
             } catch (IOException e) {
                 runOnUiThread(() -> loading.setText("Die Fahrt konnte nicht geladen werden."));
@@ -92,10 +97,10 @@ public class RideDetailActivity extends BaseActivity {
         }
         if (s.hasAny(s.alt)) metrics.add(new Metric("Höhe", "m", Ui.ALT, 0, s.alt));
         if (s.hasAny(s.speed)) metrics.add(new Metric("Tempo", "km/h", Ui.SPEED, 1, s.speed));
-        if (s.hasAny(s.power)) metrics.add(new Metric("Leistung", "W", Ui.POWER, 0, toF(s.power, s.n, false)));
+        if (s.hasAny(s.power)) metrics.add(new Metric("Leistung", "W", Ui.POWER, 0, toF(s.power, s.n, false)).idleZero());
         if (s.hasAny(s.motor)) metrics.add(new Metric("Motor", "W", Ui.ACCENT, 0, toF(s.motor, s.n, false)));
         if (s.hasAny(s.hr)) metrics.add(new Metric("Puls", "bpm", Ui.HR, 0, toF(s.hr, s.n, true)));
-        if (s.hasAny(s.cadence)) metrics.add(new Metric("Trittfr.", "/min", Ui.CAD, 0, toF(s.cadence, s.n, false)));
+        if (s.hasAny(s.cadence)) metrics.add(new Metric("Trittfr.", "/min", Ui.CAD, 0, toF(s.cadence, s.n, false)).idleZero());
         if (s.hasAny(s.soc)) metrics.add(new Metric("Akku", "%", Ui.BATT, 0, toF(s.soc, s.n, false)));
 
         // ---- map stays on top and recolours to the selected metric ----
@@ -156,6 +161,14 @@ public class RideDetailActivity extends BaseActivity {
                     tile("Akku verbraucht", used, "%", Ui.BATT));
         }
         addPair(tile("Gesamtzeit", Ui.dur(r.durationMs), "", Ui.MUTED), null);
+        TextView pn = Ui.text(this, (pause
+                ? "Auto-Pause an: Stillstand (unter 2 km/h, hier " + Ui.dur(Math.max(0, r.durationMs - r.movingMs))
+                    + ") ist gespeichert, zählt aber nicht in Mittelwerten und Diagrammen."
+                : "Auto-Pause aus: Mittelwerte und Diagramme enthalten auch die Standzeit.")
+                + " Ø Leistung und Ø Trittfrequenz wie bei Flow nur über die Zeit, in der du trittst.",
+                13, Ui.MUTED, false);
+        pn.setPadding(Ui.dp(this, 6), Ui.dp(this, 6), Ui.dp(this, 6), 0);
+        body.addView(pn);
 
         // ---- breakdown per assist level ----
         addLevelStats(s);
@@ -226,13 +239,15 @@ public class RideDetailActivity extends BaseActivity {
         for (int i = 0; i < s.n; i++) {
             int a = s.assist[i];
             if (a < 0 || a > 4) continue;
-            time[a] += 1;   // samples are ~1 s apart
+            // distance always counts (standing adds none); everything else skips paused samples
             if (i > 0 && !Float.isNaN(s.dist[i]) && !Float.isNaN(s.dist[i - 1])) {
                 double dd = s.dist[i] - s.dist[i - 1];
                 if (dd > 0 && dd < 200) dist[a] += dd;
             }
+            if (RideStore.paused(s, i, pause)) continue;
+            time[a] += 1;   // samples are ~1 s apart
             if (!Float.isNaN(s.speed[i])) { sumSpd[a] += s.speed[i]; nSpd[a]++; }
-            if (s.power[i] >= 0) { sumPw[a] += s.power[i]; nPw[a]++; }
+            if (s.power[i] > 0) { sumPw[a] += s.power[i]; nPw[a]++; }     // while pedalling, like Flow
             if (s.motor[i] >= 0) { sumMo[a] += s.motor[i]; nMo[a]++; }
         }
         for (int a = 0; a <= 4; a++) {
@@ -242,7 +257,8 @@ public class RideDetailActivity extends BaseActivity {
             int pd = Ui.dp(this, 12);
             card.setPadding(pd, Ui.dp(this, 10), pd, Ui.dp(this, 10));
             card.addView(Ui.text(this, "● " + names[a], 15, ChartView.levelColor(a == 0 ? -1 : a), true));
-            String spd = nSpd[a] > 0 ? fmtNum(sumSpd[a] / nSpd[a], 1) + " km/h" : "–";
+            // Ø speed = distance ÷ time, the same way as the overall Ø Tempo (and Flow)
+            String spd = time[a] > 0 && dist[a] > 0 ? fmtNum(dist[a] / time[a] * 3.6, 1) + " km/h" : "–";
             String pw = nPw[a] > 0 ? fmtNum(sumPw[a] / nPw[a], 0) + " W" : "–";
             String mo = nMo[a] > 0 ? fmtNum(sumMo[a] / nMo[a], 0) + " W" : "–";
             TextView v = Ui.text(this,
@@ -271,13 +287,19 @@ public class RideDetailActivity extends BaseActivity {
         boolean byLevel = "Stufe".equals(m.name);
         if (map != null) map.setData(samples, m.y, byLevel);
 
+        // Chart series: with auto-pause, standing samples are blanked out (not drawn, not counted).
+        float[] y = java.util.Arrays.copyOf(m.y, samples.n);
+        for (int i = 0; i < samples.n; i++) if (RideStore.paused(samples, i, pause)) y[i] = Float.NaN;
+
         float mn = Float.MAX_VALUE, mx = -Float.MAX_VALUE;
         double sum = 0;
         int cnt = 0;
         for (int i = 0; i < samples.n; i++) {
-            float v = m.y[i];
+            float v = y[i];
             if (Float.isNaN(v)) continue;
-            mn = Math.min(mn, v); mx = Math.max(mx, v); sum += v; cnt++;
+            mn = Math.min(mn, v); mx = Math.max(mx, v);
+            if (m.idleZero && v <= 0) continue;     // power/cadence: average only while pedalling
+            sum += v; cnt++;
         }
         if (cnt == 0) statsLine.setText("keine Daten");
         else {
@@ -290,7 +312,7 @@ public class RideDetailActivity extends BaseActivity {
 
         chartBox.removeAllViews();
         ChartView c = new ChartView(this, m.name, m.unit, m.color, m.dec);
-        c.setData(xKm, java.util.Arrays.copyOf(m.y, xKm.length), levels);
+        c.setData(xKm, java.util.Arrays.copyOf(y, xKm.length), levels);
         c.setScrubListener(this::markAt);
         chartBox.addView(c, Ui.full(this, 4));
     }

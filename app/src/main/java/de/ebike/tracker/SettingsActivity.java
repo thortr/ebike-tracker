@@ -120,6 +120,15 @@ public class SettingsActivity extends BaseActivity {
         keep.setOnCheckedChangeListener((v, checked) -> prefs.edit().putBoolean("keep_screen", checked).apply());
         keep.setPadding(0, Ui.dp(this, 10), 0, Ui.dp(this, 6));
         gc.addView(keep);
+        Switch ap = new Switch(this);
+        ap.setText("Auto-Pause im Stillstand");
+        ap.setTextColor(Ui.FG);
+        ap.setTextSize(15);
+        ap.setChecked(RideStore.pause(this));
+        ap.setOnCheckedChangeListener((v, checked) -> prefs.edit().putBoolean("auto_pause", checked).apply());
+        ap.setPadding(0, Ui.dp(this, 6), 0, Ui.dp(this, 6));
+        gc.addView(ap);
+        gc.addView(note("An: Steht das Rad (unter 2 km/h), werden alle Werte weiter gespeichert, aber nicht in Fahrzeit, Mittelwerte und Diagramme eingerechnet – wie bei adidas running und Flow. Gilt auch rückwirkend für gespeicherte Fahrten."));
         gc.addView(note("Damit Android die Aufzeichnung bei ausgeschaltetem Bildschirm nicht anhält, nimm die App von der Akku-Optimierung aus."));
         Button batt = Ui.button(this, "Akku-Optimierung ausschalten", Ui.CARD2, Ui.FG);
         batt.setOnClickListener(v -> askBattery());

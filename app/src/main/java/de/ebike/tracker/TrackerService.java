@@ -286,7 +286,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
         try {
             RideStore.Samples smp = RideStore.load(f);
             if (smp.n >= 5) {
-                RideStore.writeMeta(RideStore.summarize(f, smp));
+                RideStore.writeMeta(RideStore.summarize(f, smp, RideStore.pause(this)));
                 result = f;
             } else {
                 f.delete();
@@ -337,14 +337,13 @@ public class TrackerService extends Service implements LocationListener, SensorE
         lastTick = now;
         tickCount++;
 
-        // Smoothed live values (GPS speed and bike power jitter; Flow shows a smoothed curve).
+        // Lightly smoothed speed for the display (power is shown raw, exactly as the motor sends
+        // it – like Flow; the old power smoothing dated from before the signals were understood).
         float rawSpd = s.speedKmh(now);
         if (Float.isNaN(rawSpd)) s.dispSpeed = Float.NaN;
         else if (rawSpd <= 0.1f) s.dispSpeed = 0f;                 // standing → snap to 0, no lingering value
         else s.dispSpeed = Float.isNaN(s.dispSpeed) ? rawSpd : s.dispSpeed + 0.35f * (rawSpd - s.dispSpeed);
-        int rawPw = s.powerNow(now);
-        if (rawPw < 0) s.dispPower = -1;
-        else s.dispPower = s.dispPower < 0 ? rawPw : Math.round(s.dispPower + 0.3f * (rawPw - s.dispPower));
+        s.autoPause = RideStore.pause(this);
 
         if (s.recording && !s.paused && writer != null) {
             s.elapsedMs += dt;
@@ -389,15 +388,21 @@ public class TrackerService extends Service implements LocationListener, SensorE
                 else if (refAlt - alt >= 5) { s.lossM += refAlt - alt; refAlt = alt; }
             }
 
+            // Live averages like Flow: power and cadence only while pedalling; with auto-pause
+            // nothing is counted while standing (all values are still written to the file).
+            boolean count = !s.autoPause || moving;
             int hrv = s.hrFresh(now) ? s.hr : -1;
-            if (hrv > 0) { s.sumHr += hrv; s.nHr++; s.maxHr = Math.max(s.maxHr, hrv); }
+            if (hrv > 0) {
+                if (count) { s.sumHr += hrv; s.nHr++; }
+                s.maxHr = Math.max(s.maxHr, hrv);
+            }
             int pw = s.powerNow(now);
             int cad = s.cadenceNow(now);
             if (pw >= 0) {
-                if (moving) { s.sumPower += pw; s.nPower++; }
+                if (count && pw > 0) { s.sumPower += pw; s.nPower++; }
                 s.maxPower = Math.max(s.maxPower, pw);
             }
-            if (cad > 0) { s.sumCad += cad; s.nCad++; }
+            if (count && cad > 0) { s.sumCad += cad; s.nCad++; }
             if (s.socStart < 0 && bike && s.soc >= 0) s.socStart = s.soc;
 
             writer.write(now,
@@ -427,7 +432,7 @@ public class TrackerService extends Service implements LocationListener, SensorE
         String title, text;
         if (s.recording) {
             title = s.paused ? "Aufzeichnung pausiert" : "Aufzeichnung läuft";
-            text = Ui.f2(s.distM / 1000) + " km · " + Ui.dur(s.elapsedMs);
+            text = Ui.f2(s.distM / 1000) + " km · " + Ui.dur(s.autoPause ? s.movingMs : s.elapsedMs);
         } else {
             title = "eBike Tracker";
             text = "Sensoren verbunden, keine Aufzeichnung";

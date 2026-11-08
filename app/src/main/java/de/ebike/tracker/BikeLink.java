@@ -28,9 +28,9 @@ import java.util.UUID;
  *   a24a/a24b = avg/max rider power · 9815/9814 = rider/motor torque (experimental)
  */
 final class BikeLink {
-    // Rider-power calibration: on two clean rides (7.11., after fixing the dropouts) signal 985b
-    // read 1.027x and 1.029x Flow's rider power, so 0.97 puts both within ±0.5%.
-    static final float RIDER_CAL = 0.97f;
+    // Rider-power calibration: on three clean rides (7./8.11.) signal 985b read 1.027x, 1.029x and
+    // 0.998x Flow's rider power (mean 1.018), so 0.98 keeps all three within ±2%.
+    static final float RIDER_CAL = 0.98f;
 
     static final UUID SVC = UUID.fromString("00000010-eaa2-11e9-81b4-2a2ae2dbcce4");
     static final UUID CHR = UUID.fromString("00000011-eaa2-11e9-81b4-2a2ae2dbcce4");

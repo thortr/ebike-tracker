@@ -32,6 +32,26 @@ final class RideStore {
 
     static File metaFor(File csv) { return new File(csv.getParentFile(), csv.getName().replace(".csv", ".meta")); }
 
+    // ------------------------------------------------------------------ auto-pause
+
+    /** Below this speed the bike counts as standing (same threshold that gives Flow's "Fahrzeit"). */
+    static final float MOVING_KMH = 2f;
+
+    /** Setting "Auto-Pause im Stillstand" (default on): standing time is still recorded, but left
+     *  out of averages, ride time and charts – like adidas running and the Flow app. */
+    static boolean pause(Context c) {
+        return c.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("auto_pause", true);
+    }
+
+    static boolean moving(Samples s, int i) {
+        return !Float.isNaN(s.speed[i]) && s.speed[i] >= MOVING_KMH;
+    }
+
+    /** True if sample i should be left out of averages and charts. */
+    static boolean paused(Samples s, int i, boolean pause) {
+        return pause && !moving(s, i);
+    }
+
     // ------------------------------------------------------------------ model
 
     static final class Samples {
@@ -82,6 +102,7 @@ final class RideStore {
         double distM, gainM, lossM;
         float maxSpeed, avgSpeed;
         int avgHr = -1, maxHr = -1, avgPower = -1, maxPower = -1, avgCad = -1, socStart = -1, socEnd = -1, points;
+        boolean pause;   // auto-pause setting the averages were computed with
     }
 
     // ------------------------------------------------------------------ reading
@@ -158,10 +179,13 @@ final class RideStore {
 
     // ------------------------------------------------------------------ summary
 
-    static Ride summarize(File csv, Samples s) {
+    /** Averages follow the Flow app: rider power and cadence only while pedalling (value > 0),
+     *  speed = distance ÷ time. With auto-pause, standing time is left out of time and averages. */
+    static Ride summarize(File csv, Samples s, boolean pause) {
         Ride r = new Ride();
         r.csv = csv;
         r.points = s.n;
+        r.pause = pause;
         try {
             r.start = Long.parseLong(csv.getName().replace("ride_", "").replace(".csv", ""));
         } catch (NumberFormatException e) {
@@ -174,15 +198,19 @@ final class RideStore {
             long dt = i == 0 ? 1000 : Math.min(2000, Math.max(0, s.t[i] - s.t[i - 1]));
             r.durationMs += dt;
             float v = s.speed[i];
-            boolean moving = !Float.isNaN(v) && v >= 2f;
+            boolean moving = moving(s, i);
+            boolean count = !pause || moving;
             if (moving) r.movingMs += dt;
             if (!Float.isNaN(v) && v > r.maxSpeed) r.maxSpeed = v;
-            if (s.hr[i] > 0) { sumHr += s.hr[i]; nHr++; r.maxHr = Math.max(r.maxHr, s.hr[i]); }
+            if (s.hr[i] > 0) {
+                if (count) { sumHr += s.hr[i]; nHr++; }
+                r.maxHr = Math.max(r.maxHr, s.hr[i]);
+            }
             if (s.power[i] >= 0) {
-                if (moving) { sumP += s.power[i]; nP++; }
+                if (count && s.power[i] > 0) { sumP += s.power[i]; nP++; }
                 r.maxPower = Math.max(r.maxPower, s.power[i]);
             }
-            if (s.cadence[i] > 0) { sumC += s.cadence[i]; nC++; }
+            if (count && s.cadence[i] > 0) { sumC += s.cadence[i]; nC++; }
             if (s.soc[i] >= 0) { if (r.socStart < 0) r.socStart = s.soc[i]; r.socEnd = s.soc[i]; }
             float a = s.alt[i];
             if (!Float.isNaN(a)) {
@@ -195,7 +223,8 @@ final class RideStore {
         if (nHr > 0) r.avgHr = (int) Math.round(sumHr / nHr);
         if (nP > 0) r.avgPower = (int) Math.round(sumP / nP);
         if (nC > 0) r.avgCad = (int) Math.round(sumC / nC);
-        r.avgSpeed = r.movingMs > 0 ? (float) (r.distM / (r.movingMs / 1000.0) * 3.6) : 0f;
+        long t = pause ? r.movingMs : r.durationMs;
+        r.avgSpeed = t > 0 ? (float) (r.distM / (t / 1000.0) * 3.6) : 0f;
         return r;
     }
 
@@ -217,6 +246,8 @@ final class RideStore {
         p.setProperty("socStart", String.valueOf(r.socStart));
         p.setProperty("socEnd", String.valueOf(r.socEnd));
         p.setProperty("points", String.valueOf(r.points));
+        p.setProperty("pause", String.valueOf(r.pause));
+        p.setProperty("v", "2");   // v2: Flow-style averages (power/cadence only while pedalling)
         try (FileOutputStream o = new FileOutputStream(metaFor(r.csv))) {
             p.store(o, null);
         } catch (IOException ignored) {}
@@ -246,6 +277,10 @@ final class RideStore {
             r.socStart = Integer.parseInt(p.getProperty("socStart"));
             r.socEnd = Integer.parseInt(p.getProperty("socEnd"));
             r.points = Integer.parseInt(p.getProperty("points"));
+            // Summaries from before the Flow-style averages, or made with the other auto-pause
+            // setting, are recomputed by list().
+            if (!"2".equals(p.getProperty("v"))) return null;
+            r.pause = Boolean.parseBoolean(p.getProperty("pause"));
             return r;
         } catch (Exception e) {
             return null;
@@ -258,14 +293,15 @@ final class RideStore {
         List<Ride> out = new ArrayList<>();
         if (files == null) return out;
         Arrays.sort(files, (a, b) -> b.getName().compareTo(a.getName()));
+        boolean pause = pause(c);
         for (File f : files) {
             if (f.getName().equals("ride_" + skipStart + ".csv")) continue; // ride currently recording
             Ride r = readMeta(f);
-            if (r == null) {
+            if (r == null || r.pause != pause) {
                 try {
                     Samples s = load(f);
                     if (s.n < 5) continue;
-                    r = summarize(f, s);
+                    r = summarize(f, s, pause);
                     writeMeta(r);
                 } catch (IOException e) {
                     continue;
